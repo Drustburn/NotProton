@@ -8,12 +8,6 @@ import Testing
 @Suite("Steam repair", .serialized)
 struct SteamRepairTests {
 
-    private func scratch() throws -> URL {
-        let url = URL.temporaryDirectory.appending(path: "np-repair-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
     private func stagedStockBundle(into work: URL) async throws -> URL {
         let manifest = try ValvePackageManifest.bundled()
         let bundle = try #require(manifest.bundle)
@@ -27,7 +21,7 @@ struct SteamRepairTests {
 
     @Test("The pinned package unpacks to a bundle that is signed by Valve")
     func stagesAValveSignedBundle() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
         let staged = try await stagedStockBundle(into: work)
 
@@ -48,7 +42,7 @@ struct SteamRepairTests {
     // verifies strictly, so only the authority check catches it. Repair checks both.
     @Test("An ad-hoc signed bundle is refused even though it verifies strictly")
     func refusesAdHocSignedBundle() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
         let staged = try await stagedStockBundle(into: work)
 
@@ -68,7 +62,7 @@ struct SteamRepairTests {
     // directories named after the fields repair looks for used to answer for them.
     @Test("A path named after the expected fields cannot answer for them")
     func refusesFieldsSuppliedByThePath() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let nested = work
@@ -113,7 +107,7 @@ struct SteamRepairTests {
 
     @Test("A bundle with an added file no longer matches its signature and is refused")
     func refusesTamperedBundle() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
         let staged = try await stagedStockBundle(into: work)
 
@@ -144,7 +138,7 @@ struct SteamRepairTests {
 
     @Test("Clearing the insert removes that key and nothing else")
     func clearsOnlyTheInsert() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let plist = work.appending(path: "Info.plist")
@@ -174,7 +168,7 @@ struct SteamRepairTests {
 
     @Test("Clearing the insert reports nothing done when there is no plist or no insert")
     func clearInsertIsQuietWhenThereIsNothingToDo() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
 
         #expect(try SteamRepair.clearInsert(at: work.appending(path: "absent.plist")) == false)
@@ -190,7 +184,7 @@ struct SteamRepairTests {
     // test that hardcoded the name would still pass if the two diverged.
     @Test("Repair removes the backup the installer wrote")
     func removesTheBackupTheInstallerWrote() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let plist = work.appending(path: "Info.plist")
@@ -208,7 +202,7 @@ struct SteamRepairTests {
 
     @Test("Removing a backup that is not there is not a failure")
     func absentBackupIsNotAFailure() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
 
         #expect(try SteamRepair.removeStaleBackup(from: work.appending(path: "backups")) == false)
@@ -218,7 +212,7 @@ struct SteamRepairTests {
 
     @Test("Replacing a bundle leaves Valve's signature intact at the destination")
     func replaceInstallsAVerifiableBundle() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
         let staged = try await stagedStockBundle(into: work)
 
@@ -245,7 +239,7 @@ struct SteamRepairTests {
 
     @Test("A bundle that is not installed at all is installed rather than refused")
     func replaceInstallsWhenNothingIsThere() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
         let staged = try await stagedStockBundle(into: work)
 

@@ -6,12 +6,6 @@ import Testing
 @Suite("Bridge payload")
 struct BridgePayloadTests {
 
-    private func scratch() throws -> URL {
-        let url = URL.temporaryDirectory.appending(path: "np-bridge-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
     private func fakeResources(in work: URL) throws -> URL {
         let root = work.appending(path: "bridge")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -25,7 +19,7 @@ struct BridgePayloadTests {
 
     @Test("Locate finds all four resources when present")
     func locateFindsAll() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("bridge")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let root = try fakeResources(in: work)
@@ -35,7 +29,7 @@ struct BridgePayloadTests {
 
     @Test("Locate reports missing resources rather than silently staging nothing")
     func locateReportsMissing() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("bridge")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let root = work.appending(path: "empty-bridge")
@@ -46,7 +40,7 @@ struct BridgePayloadTests {
 
     @Test("Stage writes all six bridge paths from four resources")
     func stageWritesAll() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("bridge")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let root = try fakeResources(in: work)
@@ -68,7 +62,7 @@ struct BridgePayloadTests {
 
     @Test("Files at the correct size are left alone on a second run")
     func skipsMatchingSize() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("bridge")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let root = try fakeResources(in: work)
@@ -86,7 +80,7 @@ struct BridgePayloadTests {
 
     @Test("Flat and arch copies are byte-identical")
     func duplicatesMatch() throws {
-        let work = try scratch()
+        let work = try scratchDirectory("bridge")
         defer { try? FileManager.default.removeItem(at: work) }
 
         let root = try fakeResources(in: work)

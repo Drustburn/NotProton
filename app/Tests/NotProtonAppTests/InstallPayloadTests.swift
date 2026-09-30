@@ -6,12 +6,6 @@ import Testing
 @Suite("Install payload")
 struct InstallPayloadTests {
 
-    private func scratch() throws -> URL {
-        let url = URL.temporaryDirectory.appending(path: "np-payload-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
     private func stage(_ root: URL, dylib: Bool = true, shim: Bool = true, iconmaker: Bool = true, appinfo: Bool = true, signatures: [String] = ["1788400362.json"]) throws {
         let files = FileManager.default
         let signatureDir = root.appending(path: "signatures/macos.arm64")
@@ -48,7 +42,7 @@ struct InstallPayloadTests {
 
     @Test("Every signature database in the payload is found, in a stable order")
     func findsAllSignatureDatabases() throws {
-        let root = try scratch()
+        let root = try scratchDirectory("payload")
         defer { try? FileManager.default.removeItem(at: root) }
         try stage(root, signatures: ["1788652215.json", "1788400362.json", "notes.txt"])
 
@@ -59,7 +53,7 @@ struct InstallPayloadTests {
 
     @Test("A payload missing an artifact says which one and how to fix it")
     func reportsMissingArtifacts() throws {
-        let root = try scratch()
+        let root = try scratchDirectory("payload")
         defer { try? FileManager.default.removeItem(at: root) }
         try stage(root, dylib: false)
 
@@ -75,7 +69,7 @@ struct InstallPayloadTests {
 
     @Test("A payload with no signature database is refused")
     func refusesPayloadWithoutSignatures() throws {
-        let root = try scratch()
+        let root = try scratchDirectory("payload")
         defer { try? FileManager.default.removeItem(at: root) }
         try stage(root, signatures: [])
 
@@ -89,7 +83,7 @@ struct InstallPayloadTests {
 
     @Test("An empty payload names every missing artifact")
     func reportsEverythingMissing() throws {
-        let root = try scratch()
+        let root = try scratchDirectory("payload")
         defer { try? FileManager.default.removeItem(at: root) }
         try stage(root, dylib: false, shim: false, iconmaker: false, appinfo: false, signatures: [])
 
