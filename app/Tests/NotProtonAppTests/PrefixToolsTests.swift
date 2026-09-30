@@ -344,6 +344,13 @@ struct PrefixToolsTests {
 
     // A prefix as a game leaves it: saves under the profile, a link out to the home folder,
     // and files the game's own installer put in windows and Program Files.
+    private func usedPrefixAndRunner() throws -> (dir: URL, runner: URL, prefix: WinePrefix) {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "np-profile-\(UUID().uuidString)")
+        let home = dir.appending(path: "home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        return (dir, try fakeRunner(in: dir, home: home), try usedPrefix(in: dir, home: home))
+    }
+
     private func usedPrefix(in dir: URL, home: URL) throws -> WinePrefix {
         let library = SteamLibrary(root: dir)
         let pfx = library.compatdata.appending(path: "1574480/pfx")
@@ -615,11 +622,8 @@ struct PrefixToolsTests {
     // the link. A rebuild turns it around so Steam and the game stop reading two folders.
     @Test("A rebuild brings an older profile onto the steamuser layout")
     func rebuildPutsBackLinksTheTemplateOmits() throws {
-        let dir = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
-        let home = dir.appending(path: "home")
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let runner = try fakeRunner(in: dir, home: home)
-        let prefix = try usedPrefix(in: dir, home: home)
+        let (dir, runner, prefix) = try usedPrefixAndRunner()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let fm = FileManager.default
         let users = prefix.pfx.appending(path: "drive_c/users")
 
@@ -662,11 +666,8 @@ struct PrefixToolsTests {
     // lost the file while its save folder came through.
     @Test("A rebuild keeps a file sitting loose in a profile")
     func rebuildKeepsALooseProfileFile() throws {
-        let dir = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
-        let home = dir.appending(path: "home")
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let runner = try fakeRunner(in: dir, home: home)
-        let prefix = try usedPrefix(in: dir, home: home)
+        let (dir, runner, prefix) = try usedPrefixAndRunner()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let loose = prefix.pfx.appending(path: "drive_c/users/crossover/settings.ini")
         try Data("windowed=1".utf8).write(to: loose)
 
@@ -679,11 +680,8 @@ struct PrefixToolsTests {
     // directories are in place, and a link inside a save directory is only reached that way.
     @Test("A rebuild keeps a link sitting inside a save directory")
     func rebuildKeepsALinkInsideAProfile() throws {
-        let dir = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
-        let home = dir.appending(path: "home")
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let runner = try fakeRunner(in: dir, home: home)
-        let prefix = try usedPrefix(in: dir, home: home)
+        let (dir, runner, prefix) = try usedPrefixAndRunner()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let game = prefix.pfx.appending(path: "drive_c/users/crossover/AppData/Roaming/game")
         try FileManager.default.createSymbolicLink(
             atPath: game.appending(path: "latest").path(percentEncoded: false),
@@ -701,11 +699,8 @@ struct PrefixToolsTests {
     // and a landing link is what makes the merge give up on a name.
     @Test("A link from one profile does not take the name another profile's saves land on")
     func linksWaitForEveryRealDirectory() throws {
-        let dir = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
-        let home = dir.appending(path: "home")
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let runner = try fakeRunner(in: dir, home: home)
-        let prefix = try usedPrefix(in: dir, home: home)
+        let (dir, runner, prefix) = try usedPrefixAndRunner()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let fm = FileManager.default
         let roaming = prefix.pfx.appending(path: "drive_c/users/crossover/AppData/Roaming")
         try fm.createSymbolicLink(
@@ -729,11 +724,8 @@ struct PrefixToolsTests {
     // nothing about, so the rebuild took it away along with the tree it sat beside.
     @Test("A rebuild keeps what the template does not make")
     func rebuildKeepsStrayTopLevelNames() throws {
-        let dir = URL(filePath: NSTemporaryDirectory()).appending(path: UUID().uuidString)
-        let home = dir.appending(path: "home")
-        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        let runner = try fakeRunner(in: dir, home: home)
-        let prefix = try usedPrefix(in: dir, home: home)
+        let (dir, runner, prefix) = try usedPrefixAndRunner()
+        defer { try? FileManager.default.removeItem(at: dir) }
         let fm = FileManager.default
         let driveC = prefix.pfx.appending(path: "drive_c")
         try fm.createDirectory(at: driveC.appending(path: "Games/Quake"), withIntermediateDirectories: true)
