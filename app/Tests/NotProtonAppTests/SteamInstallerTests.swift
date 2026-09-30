@@ -8,12 +8,6 @@ import Testing
 @Suite("Steam installer", .serialized)
 struct SteamInstallerTests {
 
-    private func scratch() throws -> URL {
-        let url = URL.temporaryDirectory.appending(path: "np-install-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
-    }
-
     private func stockBundle(into work: URL) async throws -> URL {
         let manifest = try ValvePackageManifest.bundled()
         let bundle = try #require(manifest.bundle)
@@ -113,7 +107,7 @@ struct SteamInstallerTests {
 
     @Test("A full install puts every artifact in place and declares the insert")
     func installsEverything() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
         let calls = Calls()
@@ -149,7 +143,7 @@ struct SteamInstallerTests {
 
     @Test("Setting the insert keeps the rest of Valve's environment")
     func preservesValveEnvironment() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -169,7 +163,7 @@ struct SteamInstallerTests {
 
     @Test("The bundle is signed inner to outer, so every seal verifies afterwards")
     func signsInnerToOuter() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -190,7 +184,7 @@ struct SteamInstallerTests {
 
     @Test("An insert belonging to something else stops the install and is left alone")
     func refusesForeignInsert() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -213,7 +207,7 @@ struct SteamInstallerTests {
 
     @Test("Installing over an existing install is allowed and refreshes it")
     func reinstallIsAllowed() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -232,7 +226,7 @@ struct SteamInstallerTests {
 
     @Test("A failure while signing puts the plist back, so the bundle still starts")
     func revertsInsertWhenSigningFails() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -259,7 +253,7 @@ struct SteamInstallerTests {
 
     @Test("The plist backup records the state before the first install only")
     func backsUpOriginalPlistOnce() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -274,7 +268,7 @@ struct SteamInstallerTests {
 
     @Test("A missing Steam bundle is reported as its own condition")
     func reportsMissingBundle() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         var fixture = try await self.fixture(into: work)
         fixture = Fixture(
@@ -294,7 +288,7 @@ struct SteamInstallerTests {
 
     // Straight at the probe, so neither of these needs a Valve bundle to be fetched first.
     private func bundle(writable: Bool) throws -> URL {
-        let app = try scratch().appending(path: "Steam.app")
+        let app = try scratchDirectory("install").appending(path: "Steam.app")
         try FileManager.default.createDirectory(
             at: app.appending(path: "Contents/MacOS"), withIntermediateDirectories: true
         )
@@ -327,7 +321,7 @@ struct SteamInstallerTests {
     // the user to grant a permission that had nothing to do with it.
     @Test("A probe that fails for another reason keeps that reason")
     func probeFailureKeepsItsOwnReason() throws {
-        let app = try scratch().appending(path: "Steam.app")
+        let app = try scratchDirectory("install").appending(path: "Steam.app")
         defer { try? FileManager.default.removeItem(at: app.deletingLastPathComponent()) }
 
         let failure = try #require(throws: StepFailure.self) {
@@ -356,7 +350,7 @@ struct SteamInstallerTests {
 
     @Test("A second account installs its own components without touching a patched Steam")
     func secondAccountLeavesTheBundleAlone() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
         let files = FileManager.default
@@ -396,7 +390,7 @@ struct SteamInstallerTests {
 
     @Test("A Steam carrying a different build of the dylib is patched again")
     func differentBuildIsPatched() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 
@@ -424,7 +418,7 @@ struct SteamInstallerTests {
 
     @Test("A payload with nothing in it stops the install before anything is touched")
     func refusesEmptyPayload() async throws {
-        let work = try scratch()
+        let work = try scratchDirectory("install")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
 

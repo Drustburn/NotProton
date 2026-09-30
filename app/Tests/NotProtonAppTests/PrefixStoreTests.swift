@@ -6,12 +6,6 @@ import Testing
 @Suite("Prefix store")
 struct PrefixStoreTests {
 
-    private func tempDirectory() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory.appending(path: "np-pfx-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
     private func write(_ text: String, to url: URL) throws {
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -20,7 +14,7 @@ struct PrefixStoreTests {
 
     @Test("Every library path in the file is found, in order, without duplicates")
     func readsLibraryPaths() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
 
         // Shaped like the real file: nested blocks, tab separated, an apps block whose
@@ -58,7 +52,7 @@ struct PrefixStoreTests {
 
     @Test("A missing or empty file still yields the default library")
     func fallsBackToTheDefaultLibrary() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let missing = PrefixStore.libraries(vdf: dir.appending(path: "nothing.vdf"))
@@ -72,7 +66,7 @@ struct PrefixStoreTests {
 
     @Test("An entry without a pfx is not a prefix")
     func skipsEntriesWithoutAPrefix() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let library = SteamLibrary(root: dir)
 
@@ -91,7 +85,7 @@ struct PrefixStoreTests {
 
     @Test("A name comes from the library's own appmanifest, and its absence is not a failure")
     func readsTheAppName() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let library = SteamLibrary(root: dir)
 
@@ -122,7 +116,7 @@ struct PrefixStoreTests {
 
     @Test("Sizing a prefix stops at a symlink instead of walking through it")
     func doesNotFollowLinksOutOfThePrefix() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let library = SteamLibrary(root: dir)
 
@@ -147,7 +141,7 @@ struct PrefixStoreTests {
 
     @Test("Only the parked prefixes count as backups")
     func backupsIgnoreEverythingElseInTheEntry() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let library = SteamLibrary(root: dir)
         let fm = FileManager.default
@@ -168,7 +162,7 @@ struct PrefixStoreTests {
 
     @Test("Backing up a prefix copies it into a listed slot and leaves the prefix alone")
     func backUpCopiesTheLivePrefix() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let prefix = try prefix(in: dir)
         try write("save", to: prefix.pfx.appending(path: "user.reg"))
@@ -187,7 +181,7 @@ struct PrefixStoreTests {
 
     @Test("Backing up refuses a game that has never made a prefix")
     func backUpRefusesAMissingPrefix() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let prefix = try prefix(in: dir)
         try FileManager.default.removeItem(at: prefix.pfx)
@@ -200,7 +194,7 @@ struct PrefixStoreTests {
 
     @Test("A backup carries the time in its name back out as a date")
     func backupDetailsReadTheStamp() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let library = SteamLibrary(root: dir)
 
@@ -224,7 +218,7 @@ struct PrefixStoreTests {
 
     @Test("A parked prefix with no readable stamp still lists, without a date")
     func backupWithoutAStampHasNoDate() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let library = SteamLibrary(root: dir)
 
@@ -242,7 +236,7 @@ struct PrefixStoreTests {
 
     @Test("A library on the boot volume is named by its folder alone")
     func bootVolumeLibraryIsNotQualified() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let library = PrefixStore.library(at: dir)
@@ -264,7 +258,7 @@ struct PrefixStoreTests {
 
     @Test("A prefix points at the game's install folder while the game is installed")
     func findsTheInstallDirectory() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let library = SteamLibrary(root: dir)
 
@@ -317,7 +311,7 @@ struct PrefixStoreTests {
     // and carries no PROCESSOR_ARCHITECTURE, so the wrong flavor is invisible without a PE read.
     @Test("A prefix names the compatibility tool that built it through its own ntdll")
     func readsPrefixArch() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let prefix = try prefix(in: dir)
 
@@ -335,7 +329,7 @@ struct PrefixStoreTests {
     // demanded on the strength of a header that was never read.
     @Test("An unreadable header is no arch rather than a wrong one")
     func unreadableArchIsNil() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let prefix = try prefix(in: dir)
 
@@ -370,7 +364,7 @@ struct PrefixStoreTests {
 
     @Test("An idle prefix is not reported as in use")
     func idlePrefixIsNotInUse() throws {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         defer { try? FileManager.default.removeItem(at: dir) }
         let library = SteamLibrary(root: dir)
         try FileManager.default.createDirectory(
@@ -386,7 +380,7 @@ struct PrefixStoreTests {
     // Everything below needs the socket directory to be there, since a prefix whose directory
     // is absent is answered before lsof is reached at all.
     private func prefixWithServerDirectory() throws -> (WinePrefix, URL, URL) {
-        let dir = try tempDirectory()
+        let dir = try scratchDirectory("pfx")
         let library = SteamLibrary(root: dir)
         try FileManager.default.createDirectory(
             at: library.compatdata.appending(path: "1574480/pfx"), withIntermediateDirectories: true)
