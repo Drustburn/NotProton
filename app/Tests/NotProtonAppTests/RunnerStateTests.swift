@@ -49,7 +49,19 @@ struct RunnerStateTests {
         try fixture.makeClone(build: version)
 
         #expect(RunnerStore.state(runners: fixture.runners, verify: { _, _ in ["ntdll is stock"] })
-            == .unpatched(build: version, problems: ["ntdll is stock"]))
+            == .unpatched(builds: [version], problems: ["\(version): ntdll is stock"]))
+    }
+
+    @Test("Every unpatched clone is reported, not just the first")
+    func reportsEveryUnpatchedClone() throws {
+        let fixture = try Fixture()
+        let ids = SupportedRunners.all.prefix(3).map(\.id).sorted()
+        for id in ids { try fixture.makeClone(build: id) }
+        let stock = Set(ids.dropFirst())
+
+        #expect(RunnerStore.state(runners: fixture.runners, verify: { build, _ in
+            stock.contains(build.id) ? ["ntdll is stock"] : []
+        }) == .unpatched(builds: Array(ids.dropFirst()), problems: ids.dropFirst().map { "\($0): ntdll is stock" }))
     }
 
     @Test("A clone outside the allow list is orphaned, not ready")

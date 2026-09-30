@@ -134,8 +134,8 @@ final class SystemStatus {
 
     var crossOverRows: [CrossOverRow] {
         guard let snapshot else { return [] }
-        var unpatched: String?
-        if case .unpatched(let build, _) = snapshot.runner { unpatched = build }
+        var unpatched: [String] = []
+        if case .unpatched(let builds, _) = snapshot.runner { unpatched = builds }
         return CrossOverRow.rows(
             installs: snapshot.crossOver,
             licenses: snapshot.crossOverLicense,

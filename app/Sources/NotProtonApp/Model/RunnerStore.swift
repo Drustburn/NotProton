@@ -5,13 +5,13 @@ import Foundation
 enum RunnerState: Sendable, Equatable {
     case none
     case ready(builds: [String])
-    case unpatched(build: String, problems: [String])
+    case unpatched(builds: [String], problems: [String])
 
     var builds: [String] {
         switch self {
         case .none: []
         case .ready(let builds): builds
-        case .unpatched(let build, _): [build]
+        case .unpatched(let builds, _): builds
         }
     }
 }
@@ -27,11 +27,16 @@ enum RunnerStore {
         let installed = installedBuilds(in: runners)
         guard !installed.isEmpty else { return .none }
 
+        var unpatched: [String] = []
+        var problems: [String] = []
         for build in installed {
-            let problems = verify(build, SupportPaths.clonedRoot(forBuild: build.id, runners: runners))
-            if !problems.isEmpty { return .unpatched(build: build.id, problems: problems) }
+            let found = verify(build, SupportPaths.clonedRoot(forBuild: build.id, runners: runners))
+            guard !found.isEmpty else { continue }
+            unpatched.append(build.id)
+            problems += found.map { "\(build.id): \($0)" }
         }
-        return .ready(builds: installed.map(\.id))
+        if unpatched.isEmpty { return .ready(builds: installed.map(\.id)) }
+        return .unpatched(builds: unpatched, problems: problems)
     }
 
     static func clonedBuilds(in runners: URL = SupportPaths.runners) -> [String] {

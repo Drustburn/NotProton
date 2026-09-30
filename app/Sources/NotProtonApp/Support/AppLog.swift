@@ -76,8 +76,8 @@ enum AppLog {
         switch runner {
         case .none: "not set up"
         case .ready(let builds): "ready \(builds.joined(separator: ", "))"
-        case .unpatched(let build, let problems):
-            "cloned \(build) unpatched: \(problems.joined(separator: ", "))"
+        case .unpatched(_, let problems):
+            "unpatched: \(problems.joined(separator: ", "))"
         }
     }
 

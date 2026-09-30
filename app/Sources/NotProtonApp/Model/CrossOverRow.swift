@@ -40,13 +40,13 @@ struct CrossOverRow: Identifiable, Equatable {
         installed: [RunnerBuild],
         damaged: [String],
         orphaned: [String],
-        unpatched: String?
+        unpatched: [String]
     ) -> [CrossOverRow] {
         var rows: [CrossOverRow] = []
         var seen: Set<String> = []
 
         func copy(of build: String) -> Copy {
-            if build == unpatched { return .unpatched }
+            if unpatched.contains(build) { return .unpatched }
             if installed.contains(where: { $0.id == build }) { return .ready }
             if damaged.contains(build) { return .damaged }
             return .none
