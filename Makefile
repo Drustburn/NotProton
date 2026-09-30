@@ -44,6 +44,8 @@ SRCS := \
 	vendor/cJSON.c
 
 OUT_DIR     := out
+TEST_CC = $(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g \
+	-Wall -Wextra -Wno-unused-parameter -Idylib
 
 GENERATED_DIR := $(OUT_DIR)/generated
 RUN_SCRIPT_H  := $(GENERATED_DIR)/compat_run.h
@@ -123,8 +125,7 @@ COMPATCHECK := $(OUT_DIR)/compatcheck
 compatcheck: $(RUN_SCRIPT_H)
 	@if [ ! -f dylib/tests/compatcheck.c ]; then $(call SKIP,compatcheck,dylib/tests/compatcheck.c); exit 0; fi; \
 	mkdir -p $(OUT_DIR) && \
-	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g \
-	  -Wall -Wextra -Wno-unused-parameter -Idylib -I$(GENERATED_DIR) \
+	$(TEST_CC) -I$(GENERATED_DIR) \
 	  -o $(COMPATCHECK) dylib/tests/compatcheck.c && \
 	$(COMPATCHECK)
 
@@ -133,9 +134,7 @@ COMPATSVC_CHECK := $(OUT_DIR)/compatsvc-check
 compatsvc-check:
 	@if [ ! -f dylib/tests/compatsvc-check.c ]; then $(call SKIP,compatsvc-check,dylib/tests/compatsvc-check.c); exit 0; fi; \
 	mkdir -p $(OUT_DIR) && \
-	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g \
-	  -Wall -Wextra -Wno-unused-parameter -Idylib \
-	  -o $(COMPATSVC_CHECK) dylib/tests/compatsvc-check.c && \
+	$(TEST_CC) -o $(COMPATSVC_CHECK) dylib/tests/compatsvc-check.c && \
 	$(COMPATSVC_CHECK)
 
 sigcheck:
@@ -151,8 +150,7 @@ ANCHORCHECK_SRCS := dylib/tests/anchorcheck.c \
 
 $(ANCHORCHECK): $(ANCHORCHECK_SRCS) FORCE
 	@mkdir -p $(dir $@)
-	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g -O1 \
-	  -Wall -Wextra -Wno-unused-parameter -Idylib -Ivendor \
+	$(TEST_CC) -O1 -Ivendor \
 	  -o $@ $(ANCHORCHECK_SRCS)
 
 anchorcheck:
@@ -186,9 +184,7 @@ PEICON_CHECK := $(OUT_DIR)/peicon-check
 
 $(PEICON_CHECK): dylib/tests/peicon-check.c dylib/util/peicon.c dylib/util/peicon.h
 	@mkdir -p $(dir $@)
-	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g -O1 \
-	  -Wall -Wextra -Wno-unused-parameter -Idylib \
-	  -o $@ dylib/tests/peicon-check.c dylib/util/peicon.c
+	$(TEST_CC) -O1 -o $@ dylib/tests/peicon-check.c dylib/util/peicon.c
 
 peicon-fixtures:
 	@if [ ! -f dylib/tests/peicon-check.c ]; then \
@@ -206,8 +202,7 @@ WEBPATCH_FIXTURES := dylib/tests/webpatch-fixtures
 
 $(GATECHECK): dylib/tests/gatecheck.c dylib/feats/webpatch.c dylib/feats/webpatch.h
 	@mkdir -p $(dir $@)
-	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g -O1 \
-	  -Wall -Wextra -Wno-unused-parameter -Idylib -o $@ dylib/tests/gatecheck.c
+	$(TEST_CC) -O1 -o $@ dylib/tests/gatecheck.c
 
 webpatch-fixtures:
 	@if [ ! -d $(WEBPATCH_FIXTURES) ] || [ ! -f dylib/tests/gatecheck.c ]; then \
@@ -237,8 +232,7 @@ LAUNCH_SHELL := $(OUT_DIR)/launch-shell
 launch-shell:
 	@if [ ! -f dylib/tests/launch-shell.c ]; then $(call SKIP,launch-shell,dylib/tests/launch-shell.c); exit 0; fi; \
 	mkdir -p $(OUT_DIR) && \
-	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g -O1 \
-	  -Wall -Wextra -Wno-unused-parameter -Idylib -o $(LAUNCH_SHELL) dylib/tests/launch-shell.c && \
+	$(TEST_CC) -O1 -o $(LAUNCH_SHELL) dylib/tests/launch-shell.c && \
 	$(LAUNCH_SHELL)
 
 SPAWN_ENV := $(OUT_DIR)/spawn-env
@@ -246,8 +240,7 @@ SPAWN_ENV := $(OUT_DIR)/spawn-env
 spawn-env:
 	@if [ ! -f dylib/tests/spawn-env.c ]; then $(call SKIP,spawn-env,dylib/tests/spawn-env.c); exit 0; fi; \
 	mkdir -p $(OUT_DIR) && \
-	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g -O1 \
-	  -Wall -Wextra -Wno-unused-parameter -Idylib -o $(SPAWN_ENV) dylib/tests/spawn-env.c && \
+	$(TEST_CC) -O1 -o $(SPAWN_ENV) dylib/tests/spawn-env.c && \
 	$(SPAWN_ENV)
 
 SPAWN_LIVE := dylib/tests/spawn-live
@@ -286,8 +279,7 @@ panel-behavior:
 	if ! command -v node >/dev/null 2>&1; then \
 		echo "==> panel-behavior: node not found, skipped"; exit 0; fi; \
 	mkdir -p $(OUT_DIR) && \
-	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g -O1 \
-	  -Wall -Wextra -Wno-unused-parameter -Idylib -o $(OUT_DIR)/panel-emit \
+	$(TEST_CC) -O1 -o $(OUT_DIR)/panel-emit \
 	  $(PANEL_TESTS)/emit.c && \
 	node $(PANEL_TESTS)/behavior.js $(OUT_DIR)/panel-emit && \
 	node $(PANEL_TESTS)/switching.js $(OUT_DIR)/panel-emit && \
