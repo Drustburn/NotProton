@@ -62,6 +62,9 @@ final class SystemStatus {
     private(set) var failureRemedy: Remedy?
 
     private var runInFlight = false
+    // Tests replace the refresh so a run does not modify the real Steam/support folders
+    // if run on an actual user's machine.
+    @ObservationIgnored var refreshAfterRun: @MainActor (SystemStatus) async -> Void = { await $0.refresh() }
     private var checkingLicense = false
 
     var isBusy: Bool { activity != nil || runInFlight || checkingLicense }
@@ -313,7 +316,7 @@ final class SystemStatus {
             record(error)
         }
 
-        await refresh()
+        await refreshAfterRun(self)
     }
 
     private func setUpRunner(from install: CrossOverInstall?, replacingExisting: Bool = false) async {
