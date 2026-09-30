@@ -18,7 +18,7 @@ struct CrossOverRowTests {
         installed: [RunnerBuild] = [],
         damaged: [String] = [],
         orphaned: [String] = [],
-        unpatched: String? = nil,
+        unpatched: [String] = [],
         unlicensed: Set<String> = []
     ) -> [CrossOverRow] {
         var licenses: [String: CrossOverLicense.Status] = [:]
@@ -75,7 +75,7 @@ struct CrossOverRowTests {
 
         let made = rows(
             [preview, release], installed: [Self.preview], damaged: [Self.release.id],
-            orphaned: ["25.0.0.1"], unpatched: Self.preview.id
+            orphaned: ["25.0.0.1"], unpatched: [Self.preview.id]
         )
 
         #expect(made.map(\.copy) == [.unpatched, .damaged, .unsupported])
