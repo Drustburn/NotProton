@@ -14,7 +14,7 @@ PINNED = {
     '04c7200b6645decb7c2d1ba6b0195abc9af83257072558d11aa72cc067ac3377':
         {'hookRVA': 0x51f15, 'stolen': '4883bc24f000000000', 'caveRVA': 0x80be0, 'wm': 'rsi',
          'resume': 0x51f1e, 'load_path': 0xd0,
-         'payload': '4ce2ddc11c433fe15f78633fc5c1fda8b27fa642426cb26378f7d7d7b54a79f8',
+         'payload': '8504714bba0195439cb5b44c89f25c68dbb7f01bae6f72ca0a258a0daec3e244',
          'exports': {'LdrGetDllHandle': 0x1700176d0, 'LdrLoadDll': 0x1700181f0,
                      'NtProtectVirtualMemory': 0x17000f640}},
     '94cc7c14c1e9dcf58ef501015c115f8405c73b2a65cefe31faa5d9e47f36e58b':
@@ -24,6 +24,12 @@ PINNED = {
          'exports': {'LdrGetDllHandle': 0x7bc125b0, 'LdrLoadDll': 0x7bc130a0,
                      'NtProtectVirtualMemory': 0x7bc0d764, 'NtOpenFile': 0x7bc0d594,
                      'NtReadFile': 0x7bc0d2c4, 'NtClose': 0x7bc0d354}},
+    'f4fa556a3dc20f6e966a803f5de554359227a61a24cd5b5a2ad88a427ceeec58':
+        {'hookRVA': 0x34b2e, 'stolen': '488b842410010000', 'caveRVA': 0x79394, 'wm': 'rbx',
+         'resume': 0x34b36, 'load_path': 0x98,
+         'payload': '6af3f36658907cc94c096e432006807d6997bd970560f2579df748d6fd6e2bc6',
+         'exports': {'LdrGetDllHandle': 0x17002f530, 'LdrLoadDll': 0x17002ce70,
+                     'NtProtectVirtualMemory': 0x17005549c}},
     '09474795d6f306163cebab6429819999fcff50e07dbc4b067a90ec4f74a3a7d7':
         {'hookRVA': 0x2ee12, 'stolen': '8b4514a802', 'caveRVA': 0x6b2fe, 'caveSize': 3330,
          'resume': 0x2ee17, 'wm': 'esi', 'load_path': -0x3c,
@@ -44,7 +50,7 @@ PINNED = {
          # exported NtProtectVirtualMemory is a syscall thunk whose dispatcher is null.
          'guest': {'LdrLoadDll': 0x9f698, 'LdrGetDllHandle': 0x9f698,
                    'NtProtectVirtualMemory': 0xea8cc},
-         'payload': 'bee4ee13c235bd5de3cb6ce840b9695effd5623132f6dc0d137496d6a5330f5e',
+         'payload': '68a458ec9c32041c79fdd622d18e91cfbe825a5292cae362d310930e34dd598e',
          'exports': {'LdrGetDllHandle': 0x180043328, 'LdrLoadDll': 0x180040e94,
                      'NtProtectVirtualMemory': 0x180065db0}},
 }

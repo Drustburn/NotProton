@@ -44,7 +44,7 @@ enum NtdllPatcher {
             NtdllPatch(
                 arch: .x86_64Windows,
                 payloadResource: "detour2",
-                payloadSHA256: "4ce2ddc11c433fe15f78633fc5c1fda8b27fa642426cb26378f7d7d7b54a79f8",
+                payloadSHA256: "8504714bba0195439cb5b44c89f25c68dbb7f01bae6f72ca0a258a0daec3e244",
                 caveRVA: 0x80be0,
                 payloadRVA: 0x80be0,
                 hooks: [
@@ -76,6 +76,21 @@ enum NtdllPatcher {
         // FEX patches
         "27.0.0.40921-fex": [
             NtdllPatch(
+                arch: .x86_64Windows,
+                payloadResource: "detour2-fex",
+                payloadSHA256: "6af3f36658907cc94c096e432006807d6997bd970560f2579df748d6fd6e2bc6",
+                caveRVA: 0x79394,
+                payloadRVA: 0x793a0,
+                hooks: [
+                    NtdllHook(rva: 0x34b2e, stolen: [0x48, 0x8b, 0x84, 0x24, 0x10, 0x01, 0x00, 0x00]),
+                ],
+                caveSize: 3180,
+                cavePad: 0xcc,
+                machine: 0x8664,
+                magic: 0x20b,
+                imageBase: 0x1_7000_0000
+            ),
+            NtdllPatch(
                 arch: .i386Windows,
                 payloadResource: "detour32-fex",
                 payloadSHA256: "b4c697ba396ecb59125c505666ad3465d1208b8a1e3e53a0c457657b341376b9",
@@ -93,7 +108,7 @@ enum NtdllPatcher {
             NtdllPatch(
                 arch: .aarch64Windows,
                 payloadResource: "detour64-fex",
-                payloadSHA256: "bee4ee13c235bd5de3cb6ce840b9695effd5623132f6dc0d137496d6a5330f5e",
+                payloadSHA256: "68a458ec9c32041c79fdd622d18e91cfbe825a5292cae362d310930e34dd598e",
                 caveRVA: 0xf1185,
                 payloadRVA: 0xf1190,
                 hooks: [
@@ -428,7 +443,7 @@ enum NtdllPatcher {
         var written: [WineArch] = []
 
         for patch in patches(for: build) {
-            let destination = bridge.appending(path: "wine/\(patch.arch.rawValue)/ntdll.dll")
+            let destination = stagedCopy(of: patch.arch, in: bridge)
 
             if Digest.sha256IfPresent(destination) == build.patchedNtdll[patch.arch] { continue }
 
@@ -442,17 +457,68 @@ enum NtdllPatcher {
         return written
     }
 
-    private static func prune(keeping arches: [WineArch], in bridge: URL) {
-        let fm = FileManager.default
+    static func snapshot(bridge: URL) throws -> [WineArch: Data] {
+        var saved: [WineArch: Data] = [:]
 
-        for arch in WineArch.allCases where !arches.contains(arch) {
-            let directory = bridge.appending(path: "wine/\(arch.rawValue)")
-            try? fm.removeItem(at: directory.appending(path: "ntdll.dll"))
-
-            let path = directory.path(percentEncoded: false)
-            if let left = try? fm.contentsOfDirectory(atPath: path), left.isEmpty {
-                try? fm.removeItem(at: directory)
+        for arch in WineArch.allCases {
+            let copy = stagedCopy(of: arch, in: bridge)
+            guard FileManager.default.fileExists(atPath: copy.path(percentEncoded: false)) else { continue }
+            do {
+                saved[arch] = try Data(contentsOf: copy)
+            } catch {
+                throw StepFailure(
+                    step: step,
+                    detail: "\(copy.path(percentEncoded: false)) could not be read. \(error.localizedDescription)"
+                )
             }
+        }
+
+        return saved
+    }
+
+    static func restore(_ saved: [WineArch: Data], bridge: URL) throws {
+        for arch in WineArch.allCases {
+            let copy = stagedCopy(of: arch, in: bridge)
+
+            if let data = saved[arch] {
+                if (try? Data(contentsOf: copy)) != data {
+                    try atomicReplace(copy, with: data, step: step)
+                }
+                continue
+            }
+
+            do {
+                try removeStagedCopy(of: arch, in: bridge)
+            } catch {
+                throw StepFailure(
+                    step: step,
+                    detail: "\(copy.path(percentEncoded: false)) could not be removed. \(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+    private static func stagedCopy(of arch: WineArch, in bridge: URL) -> URL {
+        bridge.appending(path: "wine/\(arch.rawValue)/ntdll.dll")
+    }
+
+    private static func removeStagedCopy(of arch: WineArch, in bridge: URL) throws {
+        let fm = FileManager.default
+        let copy = stagedCopy(of: arch, in: bridge)
+
+        if fm.fileExists(atPath: copy.path(percentEncoded: false)) {
+            try fm.removeItem(at: copy)
+        }
+
+        let directory = copy.deletingLastPathComponent()
+        if let left = try? fm.contentsOfDirectory(atPath: directory.path(percentEncoded: false)), left.isEmpty {
+            try fm.removeItem(at: directory)
+        }
+    }
+
+    private static func prune(keeping arches: [WineArch], in bridge: URL) {
+        for arch in WineArch.allCases where !arches.contains(arch) {
+            try? removeStagedCopy(of: arch, in: bridge)
         }
     }
 

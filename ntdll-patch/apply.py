@@ -2,13 +2,36 @@
 # Development tool. The real patcher lives in the app (NtdllPatcher.swift).
 # This is the original Python version, kept for validating patches against
 # new CrossOver builds.
+import hashlib
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from resolve import PE, resolve, shell_vars  # noqa: E402
 
-DEFAULT_PAYLOAD = {0x8664: "detour2.bin", 0x14c: "detour32.bin", 0xaa64: "detour64-fex.bin"}
+# A new build needs its ntdll hash added here and in build-ntdll.sh.
+PAYLOAD_BY_CLEAN_SHA = {
+    "04c7200b6645decb7c2d1ba6b0195abc9af83257072558d11aa72cc067ac3377": "detour2.bin",
+    "94cc7c14c1e9dcf58ef501015c115f8405c73b2a65cefe31faa5d9e47f36e58b": "detour32.bin",
+    "f4fa556a3dc20f6e966a803f5de554359227a61a24cd5b5a2ad88a427ceeec58": "detour2-fex.bin",
+    "09474795d6f306163cebab6429819999fcff50e07dbc4b067a90ec4f74a3a7d7": "detour32-fex.bin",
+    "7823d71fbce6c9947163bf8b96beb299eabb02878245bcaf6759f2a22e81f071": "detour64-fex.bin",
+}
+
+UNAMBIGUOUS_PAYLOAD = {0xaa64: "detour64-fex.bin"}
+KNOWN_MACHINES = (0x8664, 0x14c, 0xaa64)
+
+
+def default_payload(src, machine):
+    with open(src, "rb") as f:
+        digest = hashlib.sha256(f.read()).hexdigest()
+    if digest in PAYLOAD_BY_CLEAN_SHA:
+        return PAYLOAD_BY_CLEAN_SHA[digest]
+    if machine in UNAMBIGUOUS_PAYLOAD:
+        return UNAMBIGUOUS_PAYLOAD[machine]
+    raise SystemExit(f"{src}: sha256 {digest} matches no known clean ntdll, and machine "
+                     f"{machine:#x} has more than one detour, pass payload.bin as the "
+                     f"third argument")
 
 
 def main():
@@ -20,10 +43,10 @@ def main():
 
     r = resolve(src)
     v = shell_vars(src)
-    if r['machine'] not in DEFAULT_PAYLOAD:
+    if r['machine'] not in KNOWN_MACHINES:
         raise SystemExit(f"{src}: machine {r['machine']:#x} carries no detour")
     payload_path = sys.argv[3] if len(sys.argv) > 3 \
-        else os.path.join(here, DEFAULT_PAYLOAD[r['machine']])
+        else os.path.join(here, default_payload(src, r['machine']))
     detour = open(payload_path, "rb").read()
     payload_rva = int(v['NP_PAYLOAD_RVA'], 16)
     fill = r['fill']

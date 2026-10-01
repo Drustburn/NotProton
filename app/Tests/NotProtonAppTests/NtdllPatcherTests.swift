@@ -431,16 +431,15 @@ struct NtdllStagingTests {
             hashes[arch] = try Digest.sha256(of: file)
         }
 
-        // The FEX flavor, which patches i386 and aarch64 and leaves x86_64 alone.
         let build = RunnerBuild(
             bundleVersion: "27.0.0.40921",
             releaseVersion: "20260821",
-            flavor: "fex",
+            flavor: nil,
             loaderSHA256: "unused",
             cleanNtdll: [:],
             patchedNtdll: [
+                .x86_64Windows: hashes[.x86_64Windows]!,
                 .i386Windows: hashes[.i386Windows]!,
-                .aarch64Windows: hashes[.aarch64Windows]!,
             ]
         )
         return (bridge, build)
@@ -457,12 +456,40 @@ struct NtdllStagingTests {
         #expect(written.isEmpty)
 
         let fm = FileManager.default
-        for arch in [WineArch.i386Windows, .aarch64Windows] {
+        for arch in [WineArch.x86_64Windows, .i386Windows] {
             let kept = bridge.appending(path: "wine/\(arch.rawValue)/ntdll.dll")
             #expect(fm.fileExists(atPath: kept.path(percentEncoded: false)))
         }
 
-        let foreign = bridge.appending(path: "wine/x86_64-windows/ntdll.dll")
+        let foreign = bridge.appending(path: "wine/aarch64-windows/ntdll.dll")
         #expect(!fm.fileExists(atPath: foreign.path(percentEncoded: false)))
+    }
+}
+
+@Suite("Pinned patch payloads")
+struct PinnedPatchPayloadTests {
+
+    @Test("Every pinned patch ships a payload that matches its pin")
+    func everyPinnedPayloadResolves() throws {
+        for (buildID, patches) in NtdllPatcher.byBuild {
+            for patch in patches {
+                #expect(throws: Never.self, "\(buildID) \(patch.arch.rawValue)") {
+                    _ = try NtdllPatcher.payload(for: patch)
+                }
+            }
+        }
+    }
+
+    @Test("Every pinned payload fits inside the cave it is written to")
+    func everyPinnedPayloadFitsItsCave() throws {
+        for (buildID, patches) in NtdllPatcher.byBuild {
+            for patch in patches {
+                let payload = try NtdllPatcher.payload(for: patch)
+                let where_ = "\(buildID) \(patch.arch.rawValue)"
+                #expect(patch.payloadRVA >= patch.caveRVA, "\(where_) starts before its cave")
+                let end = patch.payloadRVA + payload.count
+                #expect(end <= patch.caveRVA + patch.caveSize, "\(where_) overruns its cave")
+            }
+        }
     }
 }

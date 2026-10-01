@@ -35,6 +35,33 @@ struct RunnerSwitchTests {
         return runners
     }
 
+    private static func stagedCopy(_ arch: WineArch, in bridge: URL) -> URL {
+        bridge.appending(path: "wine/\(arch.rawValue)/ntdll.dll")
+    }
+
+    private static func writeStaged(for build: RunnerBuild, into bridge: URL) throws {
+        for arch in build.patchedNtdll.keys {
+            try atomicReplace(stagedCopy(arch, in: bridge), with: Data("\(build.id) \(arch.rawValue)".utf8), step: "test")
+        }
+    }
+
+    private static func seedBridge(_ bridge: URL, with copies: [WineArch: String]) throws -> [WineArch: Data] {
+        var seeded: [WineArch: Data] = [:]
+        for (arch, text) in copies {
+            seeded[arch] = Data(text.utf8)
+            try atomicReplace(stagedCopy(arch, in: bridge), with: seeded[arch]!, step: "test")
+        }
+        return seeded
+    }
+
+    private static func bridgeContents(_ bridge: URL) -> [WineArch: Data] {
+        var found: [WineArch: Data] = [:]
+        for arch in WineArch.allCases {
+            if let data = try? Data(contentsOf: stagedCopy(arch, in: bridge)) { found[arch] = data }
+        }
+        return found
+    }
+
     private func activate(
         _ build: RunnerBuild,
         runners: URL,
@@ -48,8 +75,9 @@ struct RunnerSwitchTests {
             bridge: runners.appending(path: "bridge"),
             license: { _ in license },
             verify: { _, _ in },
-            stage: { build, _, _ in
+            stage: { build, _, bridge in
                 calls.staged.append(build.id)
+                try Self.writeStaged(for: build, into: bridge)
                 return []
             },
             patch: { build, _, _ in
@@ -91,11 +119,13 @@ struct RunnerSwitchTests {
         #expect(calls.currentWhilePatching == Self.rosetta.id)
     }
 
-    @Test("A failed switch keeps the old build and restages its ntdll")
+    @Test("A failed switch keeps the old build and puts its bridge copies back")
     func failedSwitchRestoresPrevious() throws {
         let runners = try makeRunners(cloning: [Self.rosetta, Self.fex])
         defer { try? FileManager.default.removeItem(at: runners) }
         try RunnerInstaller.pointCurrent(atBuild: Self.rosetta.id, runners: runners)
+        let bridge = runners.appending(path: "bridge")
+        let seeded = try Self.seedBridge(bridge, with: [.x86_64Windows: "old x86_64", .i386Windows: "old i386"])
 
         let calls = Calls()
         #expect(throws: StepFailure.self) {
@@ -103,27 +133,75 @@ struct RunnerSwitchTests {
         }
 
         #expect(RunnerStore.currentBuild(runners: runners) == Self.rosetta.id)
-        #expect(calls.staged == [Self.fex.id, Self.rosetta.id])
+        #expect(calls.staged == [Self.fex.id])
+        #expect(Self.bridgeContents(bridge) == seeded)
+        #expect(!FileManager.default.fileExists(
+            atPath: bridge.appending(path: "wine/aarch64-windows").path(percentEncoded: false)))
+    }
+
+    @Test("A failed switch away from a build the app no longer lists puts its bridge copies back")
+    func failedSwitchFromUnlistedBuild() throws {
+        let unlisted = "26.0.0.1"
+        #expect(SupportedRunners.build(id: unlisted) == nil)
+
+        let runners = try makeRunners(cloning: [Self.fex])
+        defer { try? FileManager.default.removeItem(at: runners) }
+        try FileManager.default.createDirectory(
+            at: SupportPaths.clonedRoot(forBuild: unlisted, runners: runners).appending(path: "lib/wine"),
+            withIntermediateDirectories: true
+        )
+        try RunnerInstaller.pointCurrent(atBuild: unlisted, runners: runners)
+        let bridge = runners.appending(path: "bridge")
+        let seeded = try Self.seedBridge(bridge, with: [.x86_64Windows: "old x86_64", .i386Windows: "old i386"])
+
+        let calls = Calls()
+        #expect(throws: StepFailure.self) {
+            try activate(Self.fex, runners: runners, calls: calls, failPatch: true)
+        }
+
+        #expect(RunnerStore.currentBuild(runners: runners) == unlisted)
+        #expect(Self.bridgeContents(bridge) == seeded)
+    }
+
+    @Test("A failed first setup leaves no staged copies behind")
+    func failedFirstSetupLeavesBridgeEmpty() throws {
+        let runners = try makeRunners(cloning: [Self.fex])
+        defer { try? FileManager.default.removeItem(at: runners) }
+        let bridge = runners.appending(path: "bridge")
+
+        let calls = Calls()
+        #expect(throws: StepFailure.self) {
+            try activate(Self.fex, runners: runners, calls: calls, failPatch: true)
+        }
+
+        #expect(RunnerStore.currentBuild(runners: runners) == nil)
+        #expect(calls.staged == [Self.fex.id])
+        #expect(Self.bridgeContents(bridge).isEmpty)
     }
 
     @Test("A failed bridge restore reports both failures")
     func failedRestoreIsReported() throws {
         let runners = try makeRunners(cloning: [Self.rosetta, Self.fex])
-        defer { try? FileManager.default.removeItem(at: runners) }
+        let bridge = runners.appending(path: "bridge")
+        let locked = bridge.appending(path: "wine/x86_64-windows")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path(percentEncoded: false))
+            try? FileManager.default.removeItem(at: runners)
+        }
         try RunnerInstaller.pointCurrent(atBuild: Self.rosetta.id, runners: runners)
+        _ = try Self.seedBridge(bridge, with: [.x86_64Windows: "old x86_64"])
 
-        var staged: [String] = []
         let failure = try #require(throws: StepFailure.self) {
             try RunnerSetup.activate(
                 Self.fex,
                 runners: runners,
+                bridge: bridge,
                 license: { _ in Self.licensed },
                 verify: { _, _ in },
-                stage: { build, _, _ in
-                    staged.append(build.id)
-                    if build == Self.rosetta {
-                        throw StepFailure(step: "restore", detail: "disk full")
-                    }
+                stage: { build, _, bridge in
+                    try Self.writeStaged(for: build, into: bridge)
+                    try FileManager.default.setAttributes(
+                        [.posixPermissions: 0o555], ofItemAtPath: locked.path(percentEncoded: false))
                     return []
                 },
                 patch: { _, _, _ in
@@ -132,11 +210,10 @@ struct RunnerSwitchTests {
             )
         }
 
-        #expect(staged == [Self.fex.id, Self.rosetta.id])
         #expect(RunnerStore.currentBuild(runners: runners) == Self.rosetta.id)
         #expect(failure.detail.contains("patch failed"))
         #expect(failure.detail.contains("Restoring the previous build also failed"))
-        #expect(failure.detail.contains("disk full"))
+        #expect(failure.detail.contains("x86_64-windows"))
     }
 
     @Test("A build with no clone is refused without touching anything")

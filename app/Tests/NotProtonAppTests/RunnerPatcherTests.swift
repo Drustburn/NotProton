@@ -170,8 +170,11 @@ struct RunnerPatcherTests {
         try write("lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine")
         #expect(RunnerPatcher.unixArch(in: root) == "aarch64-unix")
 
+        #expect(RunnerPatcher.unixArches(in: root) == ["aarch64-unix", "x86_64-unix"])
+
         let arches = RunnerPatcher.builtins(in: root).map(\.arch)
-        #expect(arches == RunnerPatcher.windowsBuiltins.map(\.arch) + ["aarch64-unix"])
+        #expect(
+            arches == RunnerPatcher.windowsBuiltins.map(\.arch) + ["aarch64-unix", "x86_64-unix"])
         #expect(RunnerPatcher.builtins(in: root).allSatisfy { $0.name.hasPrefix("lsteamclient") })
     }
 }

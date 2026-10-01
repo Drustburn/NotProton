@@ -14,7 +14,10 @@
 // the tool's name contains "proton" so without a match every AutoCloud rule silently
 // skips the app.
 #define TOOL_DIR_NAME "notproton"
-#define TOOL_DISPLAY_NAME "CrossOver Preview"
+#define TOOL_DIR_NAME_ROSETTA "notproton-fex-rosetta"
+#define TOOL_DISPLAY_FEX "CrossOver Preview (FEX)"
+#define TOOL_DISPLAY_ROSETTA "CrossOver Preview (Rosetta)"
+#define TOOL_DISPLAY_ROSETTA_ONLY "CrossOver Preview (Rosetta build)"
 
 #define COMPAT_MANAGER_ENABLED_OFF  0x7B0
 #define COMPAT_TOOL_STRIDE          0x130
@@ -36,15 +39,15 @@ static const char TOOL_MANIFEST[] =
 // Steam's compatibilitytools.d scanner registers a tool when this file is present
 // in the tool subdirectory. install_path is "." because the manifest lives inside
 // the tool directory. to_oslist is macos
-static const char TOOL_DECLARATION[] =
+static const char TOOL_DECLARATION_FMT[] =
     "\"compatibilitytools\"\n"
     "{\n"
     "  \"compat_tools\"\n"
     "  {\n"
-    "    \"" TOOL_DIR_NAME "\"\n"
+    "    \"%s\"\n"
     "    {\n"
     "      \"install_path\" \".\"\n"
-    "      \"display_name\" \"" TOOL_DISPLAY_NAME "\"\n"
+    "      \"display_name\" \"%s\"\n"
     "      \"from_oslist\" \"windows\"\n"
     "      \"to_oslist\" \"macos\"\n"
     "    }\n"
@@ -290,34 +293,47 @@ void np_compat_export_tools_path(void) {
            tools_dir);
 }
 
-int np_compat_ensure_tool_manifest(void) {
+static int has_fex_runner(void) {
     const char *home = np_home_dir();
-    if (!home) return -1;
+    if (!home) return 0;
 
-    char tools_dir[512];
-    snprintf(tools_dir, sizeof(tools_dir),
-             "%s/Library/Application Support/Steam/compatibilitytools.d", home);
+    char base[512];
+    snprintf(base, sizeof(base),
+             "%s/Library/Application Support/notproton/runners/current", home);
 
-    if (ensure_dir(tools_dir) != 0) {
-        NP_WARN("np_compat_ensure_tool_manifest: cannot create %s", tools_dir);
-        return -1;
-    }
+    char path[768];
+    snprintf(path, sizeof(path),
+             "%s/lib/wine/aarch64-unix/wine.app/Contents/MacOS/wine", base);
+    if (access(path, X_OK) != 0) return 0;
 
-    char tool_dir[512];
-    snprintf(tool_dir, sizeof(tool_dir), "%s/%s", tools_dir, TOOL_DIR_NAME);
+    snprintf(path, sizeof(path), "%s/CrossOver-Hosted Application/wineserver-arm64", base);
+    return access(path, X_OK) == 0;
+}
+
+static const char *primary_display_name(void) {
+    return has_fex_runner() ? TOOL_DISPLAY_FEX : TOOL_DISPLAY_ROSETTA_ONLY;
+}
+
+static int write_tool(const char *tools_dir, const char *name,
+                      const char *display, const char *flavor) {
+    char tool_dir[640];
+    snprintf(tool_dir, sizeof(tool_dir), "%s/%s", tools_dir, name);
 
     if (ensure_dir(tool_dir) != 0) {
         NP_WARN("np_compat_ensure_tool_manifest: cannot create %s", tool_dir);
         return -1;
     }
 
-    char path[512];
+    char declaration[512];
+    snprintf(declaration, sizeof(declaration), TOOL_DECLARATION_FMT, name, display);
+
+    char path[768];
     int wrote = 0;
 
     // Rewritten every launch so field changes take effect. A rescan replaces it in
     // place rather than adding a second copy.
     snprintf(path, sizeof(path), "%s/compatibilitytool.vdf", tool_dir);
-    if (write_file(path, TOOL_DECLARATION, 0) == 0) wrote++;
+    if (write_file(path, declaration, 0) == 0) wrote++;
     else NP_WARN("np_compat_ensure_tool_manifest: failed to write %s", path);
 
     snprintf(path, sizeof(path), "%s/toolmanifest.vdf", tool_dir);
@@ -332,8 +348,61 @@ int np_compat_ensure_tool_manifest(void) {
     if (write_file(path, RUN_SCRIPT, 1) == 0) wrote++;
     else NP_WARN("np_compat_ensure_tool_manifest: failed to write %s", path);
 
+    char flavor_line[32];
+    snprintf(flavor_line, sizeof(flavor_line), "%s\n", flavor);
+    snprintf(path, sizeof(path), "%s/flavor", tool_dir);
+    if (write_file(path, flavor_line, 0) == 0) wrote++;
+    else NP_WARN("np_compat_ensure_tool_manifest: failed to write %s", path);
+
     if (wrote > 0)
         NP_LOG("np_compat_ensure_tool_manifest: wrote %d file(s) to %s", wrote, tool_dir);
+
+    return 0;
+}
+
+static void remove_tool(const char *tools_dir, const char *name) {
+    char tool_dir[640];
+    snprintf(tool_dir, sizeof(tool_dir), "%s/%s", tools_dir, name);
+    if (access(tool_dir, F_OK) != 0) return;
+
+    static const char *const files[] = {
+        "compatibilitytool.vdf", "toolmanifest.vdf", "run", "flavor",
+    };
+
+    char path[768];
+    for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+        snprintf(path, sizeof(path), "%s/%s", tool_dir, files[i]);
+        unlink(path);
+    }
+
+    if (rmdir(tool_dir) == 0)
+        NP_LOG("np_compat_ensure_tool_manifest: removed %s", tool_dir);
+}
+
+int np_compat_ensure_tool_manifest(void) {
+    const char *home = np_home_dir();
+    if (!home) return -1;
+
+    char tools_dir[512];
+    snprintf(tools_dir, sizeof(tools_dir),
+             "%s/Library/Application Support/Steam/compatibilitytools.d", home);
+
+    if (ensure_dir(tools_dir) != 0) {
+        NP_WARN("np_compat_ensure_tool_manifest: cannot create %s", tools_dir);
+        return -1;
+    }
+
+    int fex = has_fex_runner();
+
+    if (write_tool(tools_dir, TOOL_DIR_NAME,
+                   fex ? TOOL_DISPLAY_FEX : TOOL_DISPLAY_ROSETTA_ONLY,
+                   fex ? "fex" : "rosetta") != 0)
+        return -1;
+
+    if (fex)
+        write_tool(tools_dir, TOOL_DIR_NAME_ROSETTA, TOOL_DISPLAY_ROSETTA, "rosetta");
+    else
+        remove_tool(tools_dir, TOOL_DIR_NAME_ROSETTA);
 
     return 0;
 }
@@ -522,7 +591,7 @@ void np_compat_register_crossover(void *compat_mgr) {
     memset(tool, 0, sizeof(tool));
 
     static const char name[]        = TOOL_DIR_NAME;
-    static const char display[]     = TOOL_DISPLAY_NAME;
+    const char *display             = primary_display_name();
     static const char from_oslist[] = "windows";
     static const char to_oslist[]   = "macos";
 

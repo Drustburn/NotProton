@@ -14,14 +14,19 @@ enum RunnerPatcher {
     ]
 
     static func builtins(in root: URL) -> [(arch: String, name: String)] {
-        windowsBuiltins + [(arch: unixArch(in: root), name: "lsteamclient.so")]
+        windowsBuiltins + unixArches(in: root).map { (arch: $0, name: "lsteamclient.so") }
     }
 
-    static func unixArch(in root: URL) -> String {
+    static func unixArches(in root: URL) -> [String] {
         let arches = unixLoaders(in: root).compactMap { loader in
             loader.pathComponents.last { $0.hasSuffix("-unix") }
         }
-        return arches.contains("aarch64-unix") ? "aarch64-unix" : "x86_64-unix"
+        let present = ["aarch64-unix", "x86_64-unix"].filter { arches.contains($0) }
+        return present.isEmpty ? ["x86_64-unix"] : present
+    }
+
+    static func unixArch(in root: URL) -> String {
+        unixArches(in: root)[0]
     }
 
     struct Outcome: Sendable {

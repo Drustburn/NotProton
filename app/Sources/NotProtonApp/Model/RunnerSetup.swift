@@ -68,11 +68,8 @@ enum RunnerSetup {
             throw StepFailure(step: "Verify CrossOver license", detail: status.detail)
         }
 
-        let previous = RunnerStore.currentBuild(runners: runners)
-            .flatMap(SupportedRunners.build(id:))
-            .flatMap { $0 != build && RunnerInstaller.hasClone(forBuild: $0.id, runners: runners) ? $0 : nil }
-
         try verify(build, root)
+        let saved = try NtdllPatcher.snapshot(bridge: bridge)
 
         do {
             report(.staging)
@@ -85,18 +82,14 @@ enum RunnerSetup {
             report(.finished)
             return Outcome(build: build, staged: staged, installed: installed)
         } catch {
-            if let previous {
-                do {
-                    _ = try stage(
-                        previous, SupportPaths.clonedRoot(forBuild: previous.id, runners: runners), bridge
-                    )
-                } catch let restorationError {
-                    throw StepFailure(
-                        step: switchStep,
-                        detail: "\(error.localizedDescription) Restoring the previous build also failed: "
-                            + restorationError.localizedDescription
-                    )
-                }
+            do {
+                try NtdllPatcher.restore(saved, bridge: bridge)
+            } catch let restorationError {
+                throw StepFailure(
+                    step: switchStep,
+                    detail: "\(error.localizedDescription) Restoring the previous build also failed: "
+                        + restorationError.localizedDescription
+                )
             }
             throw error
         }

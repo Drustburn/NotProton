@@ -36,10 +36,17 @@ export CX_ROOT
 # cxcompatdb resolves its database through CX_HOME and logs an error for
 # every module loaded without it :(
 export CX_HOME="$HOME/Library/Application Support/CrossOver"
+np_flavor=""
+CDPATH=''
+np_tool_dir=$(cd -- "$(dirname -- "$0")" 2>/dev/null && pwd) || np_tool_dir=""
+if [ -n "$np_tool_dir" ] && [ -r "$np_tool_dir/flavor" ]; then
+  read -r np_flavor < "$np_tool_dir/flavor" || np_flavor=""
+fi
+
 wine_unix="$CX_ROOT/lib/wine/aarch64-unix"
 WINELOADER="$wine_unix/wine.app/Contents/MacOS/wine"
 WINESERVER="$CX_ROOT/CrossOver-Hosted Application/wineserver-arm64"
-if [ ! -x "$WINELOADER" ] || [ ! -x "$WINESERVER" ]; then
+if [ "$np_flavor" = rosetta ] || [ ! -x "$WINELOADER" ] || [ ! -x "$WINESERVER" ]; then
   wine_unix="$CX_ROOT/lib/wine/x86_64-unix"
   WINELOADER="$wine_unix/wine"
   WINESERVER="$CX_ROOT/CrossOver-Hosted Application/wineserver"
@@ -379,15 +386,12 @@ install_legacycompat() {
 }
 
 bridge_files="steamclient64.dll steamclient.dll tier0_s64.dll vstdlib_s64.dll"
-bridge_files="$bridge_files lsteamclient.dll lsteamclient.so steam.exe"
+bridge_files="$bridge_files lsteamclient.dll steam.exe"
 if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   stage_step="bridge staging"
   mkdir -p "$prefix_steam"
   for f in $bridge_files; do
     src="$bridge_src/$f"
-    if [ "$f" = lsteamclient.so ]; then
-      src="$bridge_src/${wine_unix##*/}/$f"
-    fi
     if [ ! -f "$src" ]; then
       echo "=== bridge missing $f ===" >> "$log" 2>&1 || true
       continue
