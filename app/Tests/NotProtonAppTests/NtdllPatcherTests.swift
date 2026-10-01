@@ -16,6 +16,9 @@ private struct StubPE {
     static let bssVirtualAddress = 0x200
     static let bssSize = 0x200
 
+    static let imageSize = sectionVirtualAddress + sectionSize
+    static let tableEnd = peOffset + 24 + 0xf0 + 2 * 40
+
     static func rva(forOffset offset: Int) -> Int {
         sectionVirtualAddress + (offset - sectionRawOffset)
     }
@@ -31,6 +34,10 @@ private struct StubPE {
         write(&bytes, peOffset + 6, UInt16(2))
         write(&bytes, peOffset + 20, optionalSize)
         write(&bytes, peOffset + 24, magic)
+
+        write(&bytes, peOffset + 24 + 36, UInt32(0x200))
+        write(&bytes, peOffset + 24 + 56, UInt32(imageSize))
+        write(&bytes, peOffset + 24 + 60, UInt32(sectionRawOffset))
 
         if magic == 0x20b {
             write(&bytes, peOffset + 24 + 24, imageBase)
@@ -113,12 +120,75 @@ struct NtdllPatcherTests {
         #expect(Array(result[(hookOffset + 5) ..< (hookOffset + stolen.count)]) == [0xcc, 0xcc, 0xcc, 0xcc])
     }
 
-    @Test("The file keeps its length, because a PE cannot absorb inserted bytes")
+    @Test("A padding cave keeps the file length, because a PE cannot absorb inserted bytes")
     func patchDoesNotResize() throws {
         let patch = stubPatch()
         let image = stubImage()
         let result = try NtdllPatcher.apply(patch, to: image, payload: Data(repeating: 0x90, count: 64))
         #expect(result.count == image.count)
+    }
+
+    private func sectionPatch() -> NtdllPatch {
+        let base = stubPatch()
+        return NtdllPatch(
+            arch: base.arch, payloadResource: base.payloadResource, payloadSHA256: base.payloadSHA256,
+            caveRVA: StubPE.imageSize, payloadRVA: StubPE.imageSize, hooks: base.hooks,
+            caveSize: 0x1000, cavePad: 0, machine: base.machine, magic: base.magic,
+            imageBase: base.imageBase, placement: .section
+        )
+    }
+
+    private func u32(_ bytes: [UInt8], _ offset: Int) -> Int {
+        bytes[offset ..< offset + 4].reversed().reduce(0) { $0 << 8 | Int($1) }
+    }
+
+    @Test("A section cave appends one executable page and jumps into it")
+    func sectionPlacementAppendsPage() throws {
+        let patch = sectionPatch()
+        let image = stubImage()
+        let payload = Data([0x90, 0x91, 0x92, 0x93])
+        let result = [UInt8](try NtdllPatcher.apply(patch, to: image, payload: payload))
+
+        #expect(result.count == image.count + 0x1000)
+        #expect(result[StubPE.peOffset + 6] == 3)
+        #expect(u32(result, StubPE.peOffset + 24 + 56) == StubPE.imageSize + 0x1000)
+
+        let header = StubPE.tableEnd
+        #expect(Array(result[header ..< header + 8]) == Array(".npdet".utf8) + [0, 0])
+        #expect(u32(result, header + 8) == 0x1000)
+        #expect(u32(result, header + 12) == StubPE.imageSize)
+        #expect(u32(result, header + 16) == 0x1000)
+        #expect(u32(result, header + 20) == image.count)
+        #expect(u32(result, header + 36) == 0x6000_0020)
+        #expect(Array(result[image.count ..< image.count + 4]) == [0x90, 0x91, 0x92, 0x93])
+
+        let hookOffset = StubPE.sectionRawOffset + 0x100
+        #expect(result[hookOffset] == 0xe9)
+        #expect(Int(Int32(truncatingIfNeeded: u32(result, hookOffset + 1)))
+            == patch.payloadRVA - (patch.hooks[0].rva + 5))
+    }
+
+    @Test("A section cave pinned somewhere other than the image end is refused")
+    func sectionPlacementNeedsImageEnd() throws {
+        let base = sectionPatch()
+        let moved = NtdllPatch(
+            arch: base.arch, payloadResource: base.payloadResource, payloadSHA256: base.payloadSHA256,
+            caveRVA: base.caveRVA + 0x1000, payloadRVA: base.caveRVA + 0x1000, hooks: base.hooks,
+            caveSize: base.caveSize, cavePad: 0, machine: base.machine, magic: base.magic,
+            imageBase: base.imageBase, placement: .section
+        )
+        #expect(throws: StepFailure.self) {
+            try NtdllPatcher.apply(moved, to: stubImage(), payload: Data([0x90]))
+        }
+    }
+
+    @Test("A section cave with no free header slot is refused, so a second patch cannot stack")
+    func sectionPlacementNeedsFreeHeader() throws {
+        var bytes = [UInt8](stubImage())
+        bytes[StubPE.tableEnd] = 0x2e
+        #expect(throws: StepFailure.self) {
+            try NtdllPatcher.apply(sectionPatch(), to: Data(bytes), payload: Data([0x90]))
+        }
     }
 
     // MARK: - Refusals
@@ -254,9 +324,10 @@ struct NtdllPatcherTests {
 
     // The point of the port: the same input has to come out as the bytes apply.py and
     // apply32.py produced, which SupportedRunners records. Needs an unpatched CrossOver.
-    @Test("Patching the unpatched ntdll reproduces the recorded hashes")
-    func realNtdllReproducesRecordedHashes() throws {
-        let root = URL(filePath: "/Applications/CrossOver Preview.app/Contents/SharedSupport/CrossOver")
+    @Test("Patching the unpatched ntdll reproduces the recorded hashes",
+          arguments: ["CrossOver Preview", "CrossOver"])
+    func realNtdllReproducesRecordedHashes(app: String) throws {
+        let root = URL(filePath: "/Applications/\(app).app/Contents/SharedSupport/CrossOver")
         guard FileManager.default.fileExists(atPath: root.path(percentEncoded: false)),
               let installed = Digest.sha256IfPresent(CrossOverSource.unixLoader(inRoot: root)),
               let build = SupportedRunners.build(loaderSHA256: installed)
@@ -325,7 +396,7 @@ struct NtdllPatcherTests {
     // The bridge here came out of apply.py and apply32.py, so staging from the same clone has
     // to be byte identical. A clean ntdll cannot be a fixture, so no runner means skip.
     private static func cleanRunnerRoot(for build: RunnerBuild) -> URL? {
-        let root = SupportPaths.currentRunner
+        let root = SupportPaths.clonedRoot(forBuild: build.id)
         guard FileManager.default.fileExists(
             atPath: root.appending(path: "lib/wine").path(percentEncoded: false)
         ) else { return nil }
@@ -357,9 +428,8 @@ struct NtdllPatcherTests {
 
         var compared: [WineArch] = []
         for patch in NtdllPatcher.patches(for: build) {
-            let relative = "wine/\(patch.arch.rawValue)/ntdll.dll"
-            let staged = scratch.appending(path: relative)
-            let existing = SupportPaths.bridge.appending(path: relative)
+            let staged = NtdllPatcher.stagedCopy(of: patch.arch, build: build.id, in: scratch)
+            let existing = NtdllPatcher.stagedCopy(of: patch.arch, build: build.id)
 
             #expect(Digest.sha256IfPresent(staged) == build.patchedNtdll[patch.arch])
             guard let live = Digest.sha256IfPresent(existing) else { continue }
@@ -370,7 +440,7 @@ struct NtdllPatcherTests {
         // A staged bridge that matched nothing is a test that skipped. Asked per build rather
         // than against a fixed arch, so a bridge of another flavor does not stand this down.
         let bridgeHoldsThisBuild = build.patchedNtdll.keys.contains { arch in
-            Digest.sha256IfPresent(SupportPaths.bridge.appending(path: "wine/\(arch.rawValue)/ntdll.dll")) != nil
+            Digest.sha256IfPresent(NtdllPatcher.stagedCopy(of: arch, build: build.id)) != nil
         }
         if bridgeHoldsThisBuild {
             #expect(compared.count == build.patchedNtdll.count)
@@ -424,7 +494,7 @@ struct NtdllStagingTests {
 
         var hashes: [WineArch: String] = [:]
         for arch in WineArch.allCases {
-            let directory = bridge.appending(path: "wine/\(arch.rawValue)")
+            let directory = bridge.appending(path: "wine/27.0.0.40921/\(arch.rawValue)")
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let file = directory.appending(path: "ntdll.dll")
             try Data("staged \(arch.rawValue)".utf8).write(to: file)
@@ -457,12 +527,46 @@ struct NtdllStagingTests {
 
         let fm = FileManager.default
         for arch in [WineArch.x86_64Windows, .i386Windows] {
-            let kept = bridge.appending(path: "wine/\(arch.rawValue)/ntdll.dll")
+            let kept = NtdllPatcher.stagedCopy(of: arch, build: build.id, in: bridge)
             #expect(fm.fileExists(atPath: kept.path(percentEncoded: false)))
         }
 
-        let foreign = bridge.appending(path: "wine/aarch64-windows/ntdll.dll")
+        let foreign = NtdllPatcher.stagedCopy(of: .aarch64Windows, build: build.id, in: bridge)
         #expect(!fm.fileExists(atPath: foreign.path(percentEncoded: false)))
+    }
+
+    @Test("Restaging installed builds reports a build it cannot stage and carries on")
+    func stageInstalledCollectsFailures() throws {
+        let (bridge, build) = try stagedBridge()
+        defer { try? FileManager.default.removeItem(at: bridge) }
+        let broken = SupportedRunners.all[0]
+
+        let failures = NtdllPatcher.stageInstalled(
+            builds: [broken, build], runners: bridge.appending(path: "runners"), bridge: bridge
+        )
+
+        #expect(failures.map(\.build) == [broken.id])
+        #expect(FileManager.default.fileExists(atPath: NtdllPatcher.stagedCopy(
+            of: .x86_64Windows, build: build.id, in: bridge).path(percentEncoded: false)))
+    }
+
+    @Test("Pruning keeps the listed builds and drops every other entry under wine")
+    func pruneKeepsListedBuilds() throws {
+        let (bridge, build) = try stagedBridge()
+        defer { try? FileManager.default.removeItem(at: bridge) }
+        let fm = FileManager.default
+        let other = bridge.appending(path: "wine/26.3.0.39832")
+        let legacy = bridge.appending(path: "wine/x86_64-windows")
+        for directory in [other, legacy] {
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+
+        NtdllPatcher.pruneBuilds(keeping: [build.id], in: bridge)
+
+        #expect(fm.fileExists(atPath: NtdllPatcher.stagedCopy(
+            of: .x86_64Windows, build: build.id, in: bridge).path(percentEncoded: false)))
+        #expect(!fm.fileExists(atPath: other.path(percentEncoded: false)))
+        #expect(!fm.fileExists(atPath: legacy.path(percentEncoded: false)))
     }
 }
 

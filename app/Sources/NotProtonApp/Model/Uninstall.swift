@@ -39,7 +39,7 @@ enum Uninstall {
         innerPlist: URL = SupportPaths.Steam.innerInfoPlist,
         updateBlocks: [URL] = UpdateBlock.paths,
         legacyCompat: URL = SupportPaths.Steam.legacyCompat,
-        compatTool: URL = SupportPaths.Steam.compatTool,
+        compatTools: [URL] = SupportPaths.Steam.notprotonTools(),
         directories: [URL] = [
             SupportPaths.support,
             SupportPaths.packageDownloads.deletingLastPathComponent(),
@@ -63,7 +63,7 @@ enum Uninstall {
 
         report(.removing)
         let removed = try remove(
-            legacyCompat: legacyCompat, compatTool: compatTool, directories: directories
+            legacyCompat: legacyCompat, compatTools: compatTools, directories: directories
         )
 
         report(.finished)
@@ -106,11 +106,11 @@ enum Uninstall {
         return true
     }
 
-    static func remove(legacyCompat: URL, compatTool: URL, directories: [URL]) throws -> [String] {
+    static func remove(legacyCompat: URL, compatTools: [URL], directories: [URL]) throws -> [String] {
         let files = FileManager.default
         var removed: [String] = []
 
-        for target in [legacyCompat, compatTool] + directories {
+        for target in [legacyCompat] + compatTools + directories {
             let path = target.path(percentEncoded: false)
             guard files.fileExists(atPath: path) else { continue }
             try WriteRefused.catching(path) { try files.removeItem(at: target) }

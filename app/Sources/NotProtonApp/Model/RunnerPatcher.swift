@@ -98,7 +98,7 @@ enum RunnerPatcher {
 
         for arch in WineArch.allCases {
             guard let expected = build.patchedNtdll[arch] else { continue }
-            let staged = bridge.appending(path: "wine/\(arch.rawValue)/ntdll.dll")
+            let staged = NtdllPatcher.stagedCopy(of: arch, build: build.id, in: bridge)
 
             guard Digest.sha256IfPresent(staged) == expected else {
                 throw StepFailure(

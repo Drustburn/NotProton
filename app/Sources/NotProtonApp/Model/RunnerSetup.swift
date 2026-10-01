@@ -24,8 +24,9 @@ enum RunnerSetup {
         let build: RunnerBuild
         let staged: [WineArch]
         let installed: RunnerPatcher.Outcome
+        var toolsChanged = false
 
-        var stagedNothing: Bool { staged.isEmpty && installed.wroteNothing }
+        var stagedNothing: Bool { staged.isEmpty && installed.wroteNothing && !toolsChanged }
     }
 
     static func run(
@@ -37,15 +38,17 @@ enum RunnerSetup {
 
         report(.cloning)
         let build = try RunnerInstaller.clone(from: install, replacingExisting: replacingExisting)
-        return try activate(build, report: report)
+        return try prepare(build, report: report)
     }
 
-    static let switchStep = "Switch compatibility tool"
+    static let prepareStep = "Set up compatibility tool"
 
-    static func activate(
+    static func prepare(
         _ build: RunnerBuild,
         runners: URL = SupportPaths.runners,
         bridge: URL = SupportPaths.bridge,
+        toolList: URL = SupportPaths.toolList,
+        compatTools: URL = SupportPaths.Steam.compatTools,
         license: (URL) -> CrossOverLicense.Status = { CrossOverLicense.check(crossOverRoot: $0) },
         verify: (RunnerBuild, URL) throws -> Void = RunnerInstaller.verifyClone,
         stage: (RunnerBuild, URL, URL) throws -> [WineArch] = {
@@ -58,7 +61,7 @@ enum RunnerSetup {
     ) throws -> Outcome {
         guard RunnerInstaller.hasClone(forBuild: build.id, runners: runners) else {
             throw StepFailure(
-                step: switchStep, detail: "Build \(build.displayVersion) has not been set up."
+                step: prepareStep, detail: "Build \(build.displayVersion) has not been set up."
             )
         }
 
@@ -69,29 +72,17 @@ enum RunnerSetup {
         }
 
         try verify(build, root)
-        let saved = try NtdllPatcher.snapshot(bridge: bridge)
 
-        do {
-            report(.staging)
-            let staged = try stage(build, root, bridge)
+        report(.staging)
+        let staged = try stage(build, root, bridge)
 
-            report(.patching)
-            let installed = try patch(build, root, bridge)
-            try RunnerInstaller.pointCurrent(atBuild: build.id, runners: runners)
+        report(.patching)
+        var outcome = Outcome(build: build, staged: staged, installed: try patch(build, root, bridge))
+        outcome.toolsChanged = try CompatToolList.sync(
+            runners: runners, bridge: bridge, file: toolList, compatTools: compatTools
+        )
 
-            report(.finished)
-            return Outcome(build: build, staged: staged, installed: installed)
-        } catch {
-            do {
-                try NtdllPatcher.restore(saved, bridge: bridge)
-            } catch let restorationError {
-                throw StepFailure(
-                    step: switchStep,
-                    detail: "\(error.localizedDescription) Restoring the previous build also failed: "
-                        + restorationError.localizedDescription
-                )
-            }
-            throw error
-        }
+        report(.finished)
+        return outcome
     }
 }

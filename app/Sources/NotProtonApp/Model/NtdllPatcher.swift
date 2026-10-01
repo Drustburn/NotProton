@@ -10,6 +10,11 @@ struct NtdllHook: Sendable {
     let stolen: [UInt8]
 }
 
+enum CavePlacement: Sendable {
+    case padding
+    case section
+}
+
 struct NtdllPatch: Sendable {
     let arch: WineArch
 
@@ -29,6 +34,8 @@ struct NtdllPatch: Sendable {
     let machine: UInt16
     let magic: UInt16
     let imageBase: UInt64
+
+    var placement: CavePlacement = .padding
 }
 
 enum NtdllPatcher {
@@ -36,6 +43,11 @@ enum NtdllPatcher {
     static let step = "Patch ntdll"
 
     private static let magicPE32Plus: UInt16 = 0x20b
+    // SECTION_NAME, SECTION_SIZE and SECTION_FLAGS in resolve.py. The patched file is checked
+    // against patchedNtdll, so a value that drifts here makes patching fail.
+    private static let sectionName: [UInt8] = Array(".npdet".utf8) + [0, 0]
+    private static let sectionSize = 0x1000
+    private static let sectionFlags: UInt32 = 0x6000_0020
     private static let machineARM64: UInt16 = 0xaa64
 
 
@@ -71,6 +83,41 @@ enum NtdllPatcher {
                 machine: 0x14c,
                 magic: 0x10b,
                 imageBase: 0x7bc0_0000
+            ),
+        ],
+        "26.3.0.39832": [
+            NtdllPatch(
+                arch: .x86_64Windows,
+                payloadResource: "detour2-cx26",
+                payloadSHA256: "e35b834408599c45f30b23a6d2bf38acfa5c3df4d15206617c471e23a4a01bfb",
+                caveRVA: 0xae000,
+                payloadRVA: 0xae000,
+                hooks: [
+                    NtdllHook(rva: 0x44972,
+                              stolen: [0x48, 0x83, 0xbc, 0x24, 0xf0, 0x00, 0x00, 0x00, 0x00]),
+                ],
+                caveSize: 0x1000,
+                cavePad: 0x00,
+                machine: 0x8664,
+                magic: 0x20b,
+                imageBase: 0x1_7000_0000,
+                placement: .section
+            ),
+            NtdllPatch(
+                arch: .i386Windows,
+                payloadResource: "detour32-cx26",
+                payloadSHA256: "be465bc936cafafae4aa1b4c41f668e08848492d9858c2cf2ad483a9f1ab25e5",
+                caveRVA: 0xaa000,
+                payloadRVA: 0xaa000,
+                hooks: [
+                    NtdllHook(rva: 0x43b40, stolen: [0xf6, 0x45, 0xc0, 0x01, 0x75, 0x26]),
+                ],
+                caveSize: 0x1000,
+                cavePad: 0x00,
+                machine: 0x14c,
+                magic: 0x10b,
+                imageBase: 0x7bc0_0000,
+                placement: .section
             ),
         ],
         // FEX patches
@@ -136,6 +183,9 @@ enum NtdllPatcher {
     static func apply(_ patch: NtdllPatch, to image: Data, payload: Data) throws -> Data {
         var bytes = [UInt8](image)
         try validateHeaders(patch, bytes)
+        if patch.placement == .section {
+            try appendSection(patch, to: &bytes)
+        }
 
         let caveOffset = try fileOffset(of: patch.caveRVA, in: bytes, describing: "cave", patch: patch)
         let payloadOffset = try fileOffset(of: patch.payloadRVA, in: bytes, describing: "payload", patch: patch)
@@ -241,6 +291,59 @@ enum NtdllPatcher {
         return jump
     }
 
+
+    private static func appendSection(_ patch: NtdllPatch, to bytes: inout [UInt8]) throws {
+        let pe = Int(try u32(bytes, 0x3c))
+        let sections = Int(try u16(bytes, pe + 6))
+        let optional = pe + 24
+        let table = optional + Int(try u16(bytes, pe + 20))
+        let header = table + sections * 40
+        let fileAlignment = Int(try u32(bytes, optional + 36))
+        let imageSize = Int(try u32(bytes, optional + 56))
+        let headersSize = Int(try u32(bytes, optional + 60))
+
+        guard patch.caveSize == sectionSize, imageSize == patch.caveRVA else {
+            throw StepFailure(
+                step: step,
+                detail: "The \(patch.arch.rawValue) ntdll image ends at \(hex(imageSize)), and the detour "
+                    + "section was pinned at \(hex(patch.caveRVA))."
+            )
+        }
+        guard header + 40 <= headersSize, bytes[header ..< header + 40].allSatisfy({ $0 == 0 }) else {
+            throw StepFailure(
+                step: step,
+                detail: "The \(patch.arch.rawValue) ntdll has no free section header slot for the detour."
+            )
+        }
+        guard fileAlignment > 0, fileAlignment & (fileAlignment - 1) == 0 else {
+            throw StepFailure(
+                step: step,
+                detail: "The \(patch.arch.rawValue) ntdll file alignment \(hex(fileAlignment)) is not a power of two."
+            )
+        }
+
+        let rawOffset = (bytes.count + fileAlignment - 1) & ~(fileAlignment - 1)
+        // The last zero is NumberOfRelocations and NumberOfLinenumbers, two bytes each.
+        var entry = sectionName
+        for field in [UInt32(sectionSize), UInt32(patch.caveRVA), UInt32(sectionSize), UInt32(rawOffset),
+                      0, 0, 0, sectionFlags] {
+            withUnsafeBytes(of: field.littleEndian) { entry.append(contentsOf: $0) }
+        }
+        bytes.replaceSubrange(header ..< header + 40, with: entry)
+
+        put16(UInt16(sections + 1), at: pe + 6, in: &bytes)
+        put32(UInt32(imageSize + sectionSize), at: optional + 56, in: &bytes)
+        bytes.append(contentsOf: repeatElement(0, count: rawOffset + sectionSize - bytes.count))
+    }
+
+    private static func put16(_ value: UInt16, at offset: Int, in bytes: inout [UInt8]) {
+        bytes[offset] = UInt8(value & 0xff)
+        bytes[offset + 1] = UInt8(value >> 8)
+    }
+
+    private static func put32(_ value: UInt32, at offset: Int, in bytes: inout [UInt8]) {
+        for index in 0 ..< 4 { bytes[offset + index] = UInt8((value >> (8 * UInt32(index))) & 0xff) }
+    }
 
     private static func validateHeaders(_ patch: NtdllPatch, _ bytes: [UInt8]) throws {
         let pe = Int(try u32(bytes, 0x3c))
@@ -443,7 +546,7 @@ enum NtdllPatcher {
         var written: [WineArch] = []
 
         for patch in patches(for: build) {
-            let destination = stagedCopy(of: patch.arch, in: bridge)
+            let destination = stagedCopy(of: patch.arch, build: build.id, in: bridge)
 
             if Digest.sha256IfPresent(destination) == build.patchedNtdll[patch.arch] { continue }
 
@@ -452,59 +555,49 @@ enum NtdllPatcher {
             written.append(patch.arch)
         }
 
-        prune(keeping: patches(for: build).map(\.arch), in: bridge)
+        prune(keeping: patches(for: build).map(\.arch), build: build.id, in: bridge)
 
         return written
     }
 
-    static func snapshot(bridge: URL) throws -> [WineArch: Data] {
-        var saved: [WineArch: Data] = [:]
-
-        for arch in WineArch.allCases {
-            let copy = stagedCopy(of: arch, in: bridge)
-            guard FileManager.default.fileExists(atPath: copy.path(percentEncoded: false)) else { continue }
+    static func stageInstalled(
+        builds: [RunnerBuild] = RunnerStore.installedBuilds(),
+        runners: URL = SupportPaths.runners,
+        bridge: URL = SupportPaths.bridge
+    ) -> [(build: String, error: any Error)] {
+        var failures: [(build: String, error: any Error)] = []
+        for build in builds {
             do {
-                saved[arch] = try Data(contentsOf: copy)
+                try stage(build: build, runnerRoot: SupportPaths.clonedRoot(forBuild: build.id, runners: runners),
+                          bridge: bridge)
             } catch {
-                throw StepFailure(
-                    step: step,
-                    detail: "\(copy.path(percentEncoded: false)) could not be read. \(error.localizedDescription)"
-                )
+                failures.append((build.id, error))
             }
         }
-
-        return saved
+        return failures
     }
 
-    static func restore(_ saved: [WineArch: Data], bridge: URL) throws {
-        for arch in WineArch.allCases {
-            let copy = stagedCopy(of: arch, in: bridge)
-
-            if let data = saved[arch] {
-                if (try? Data(contentsOf: copy)) != data {
-                    try atomicReplace(copy, with: data, step: step)
-                }
-                continue
-            }
-
-            do {
-                try removeStagedCopy(of: arch, in: bridge)
-            } catch {
-                throw StepFailure(
-                    step: step,
-                    detail: "\(copy.path(percentEncoded: false)) could not be removed. \(error.localizedDescription)"
-                )
-            }
-        }
+    static func stagedCopy(of arch: WineArch, build: String, in bridge: URL = SupportPaths.bridge) -> URL {
+        bridge.appending(path: "wine/\(build)/\(arch.rawValue)/ntdll.dll")
     }
 
-    private static func stagedCopy(of arch: WineArch, in bridge: URL) -> URL {
-        bridge.appending(path: "wine/\(arch.rawValue)/ntdll.dll")
-    }
-
-    private static func removeStagedCopy(of arch: WineArch, in bridge: URL) throws {
+    // Also clears the wine/<arch> copies 1.0/1.0.1 left behind.
+    static func pruneBuilds(
+        keeping builds: Set<String>, in bridge: URL = SupportPaths.bridge, keepingLegacy: Bool = false
+    ) {
+        let wine = bridge.appending(path: "wine")
         let fm = FileManager.default
-        let copy = stagedCopy(of: arch, in: bridge)
+        let legacy = keepingLegacy ? Set(WineArch.allCases.map(\.rawValue)) : []
+        let entries = (try? fm.contentsOfDirectory(at: wine, includingPropertiesForKeys: nil)) ?? []
+        for entry in entries
+        where !builds.contains(entry.lastPathComponent) && !legacy.contains(entry.lastPathComponent) {
+            try? fm.removeItem(at: entry)
+        }
+    }
+
+    private static func removeStagedCopy(of arch: WineArch, build: String, in bridge: URL) throws {
+        let fm = FileManager.default
+        let copy = stagedCopy(of: arch, build: build, in: bridge)
 
         if fm.fileExists(atPath: copy.path(percentEncoded: false)) {
             try fm.removeItem(at: copy)
@@ -516,9 +609,9 @@ enum NtdllPatcher {
         }
     }
 
-    private static func prune(keeping arches: [WineArch], in bridge: URL) {
+    private static func prune(keeping arches: [WineArch], build: String, in bridge: URL) {
         for arch in WineArch.allCases where !arches.contains(arch) {
-            try? removeStagedCopy(of: arch, in: bridge)
+            try? removeStagedCopy(of: arch, build: build, in: bridge)
         }
     }
 

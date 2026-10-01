@@ -18,6 +18,11 @@ ROSETTA_CLEAN_I386=94cc7c14c1e9dcf58ef501015c115f8405c73b2a65cefe31faa5d9e47f36e
 ROSETTA_PATCHED_X86_64=b6a98622fb8f7e6a998bc038f442b17d257da3df5e9e135f0c35f7bbc46ea5d6
 ROSETTA_PATCHED_I386=25bfde1f50ee96485763968ef10b9d9ad35e38214232f17ebdc009b098af44a0
 
+CX26_CLEAN_X86_64=6dff64c00793ce92124f1316985c63783f539f26b392975c70f57637458d2387
+CX26_CLEAN_I386=2c60ee6b00dd13b7f6cb11017778a041ba6a321eaea194f1fa0dca7eab8403e2
+CX26_PATCHED_X86_64=c0e21a9a5250f0a97c08d3c3e1798566255387213e2553b1e555264fb9ded97e
+CX26_PATCHED_I386=e641d7b2e81ee13877823494679ba2d87e0d61b8a87e8a1ce92b4fe73631ae74
+
 FEX_CLEAN_X86_64=f4fa556a3dc20f6e966a803f5de554359227a61a24cd5b5a2ad88a427ceeec58
 FEX_CLEAN_I386=09474795d6f306163cebab6429819999fcff50e07dbc4b067a90ec4f74a3a7d7
 FEX_CLEAN_AARCH64=7823d71fbce6c9947163bf8b96beb299eabb02878245bcaf6759f2a22e81f071
@@ -44,10 +49,13 @@ flavor_of() {
     for cand in "$CX_ROOT/lib/wine/x86_64-windows/ntdll.dll.notproton-orig" \
                 "$CX_ROOT/lib/wine/x86_64-windows/ntdll.dll"; do
         [ -f "$cand" ] || continue
-        if [ "$(sha "$cand")" = "$ROSETTA_CLEAN_X86_64" ]; then echo rosetta; return 0; fi
+        case "$(sha "$cand")" in
+            "$ROSETTA_CLEAN_X86_64") echo rosetta; return 0 ;;
+            "$CX26_CLEAN_X86_64")    echo cx26; return 0 ;;
+        esac
     done
     die "no ntdll under $CX_ROOT/lib/wine matches a pinned build
-       pass FLAVOR=rosetta or FLAVOR=fex to choose the pins anyway"
+       pass FLAVOR=rosetta, FLAVOR=cx26 or FLAVOR=fex to choose the pins anyway"
 }
 
 if [ -z "${FLAVOR:-}" ]; then
@@ -55,9 +63,11 @@ if [ -z "${FLAVOR:-}" ]; then
 fi
 
 case "$FLAVOR" in
-    rosetta) tools="x86_64-w64-mingw32-gcc i686-w64-mingw32-gcc" ;;
-    fex)     tools="x86_64-w64-mingw32-gcc i686-w64-mingw32-gcc clang ld.lld" ;;
-    *)       die "unknown flavor $FLAVOR, expected rosetta or fex" ;;
+    rosetta) tools="x86_64-w64-mingw32-gcc i686-w64-mingw32-gcc"; BUILD=27.0.0.40921 ;;
+    cx26)    tools="x86_64-w64-mingw32-gcc i686-w64-mingw32-gcc"; BUILD=26.3.0.39832 ;;
+    fex)     tools="x86_64-w64-mingw32-gcc i686-w64-mingw32-gcc clang ld.lld"
+             BUILD=27.0.0.40921-fex ;;
+    *)       die "unknown flavor $FLAVOR, expected rosetta, cx26 or fex" ;;
 esac
 
 for t in $tools; do
@@ -109,6 +119,13 @@ case "$FLAVOR" in
         patch_one i386-windows   build32.sh rosetta detour32.bin \
             "$ROSETTA_CLEAN_I386"   "$ROSETTA_PATCHED_I386"
         ;;
+    cx26)
+        ARCHES="x86_64-windows i386-windows"
+        patch_one x86_64-windows build.sh   cx26 detour2-cx26.bin \
+            "$CX26_CLEAN_X86_64" "$CX26_PATCHED_X86_64"
+        patch_one i386-windows   build32.sh cx26 detour32-cx26.bin \
+            "$CX26_CLEAN_I386"   "$CX26_PATCHED_I386"
+        ;;
     fex)
         # The FEX build ships a version of Wine that runs through Rosetta as well as
         # the FEX/ARM version, so all three ntdlls need patching.
@@ -128,9 +145,9 @@ if [ "$install" -eq 0 ]; then
 fi
 
 for arch in $ARCHES; do
-    d="$BRIDGE_DIR/wine/$arch"
+    d="$BRIDGE_DIR/wine/$BUILD/$arch"
     mkdir -p "$d"
     cp "$OUT/$arch/ntdll.dll" "$d/ntdll.dll"
     echo "==> installed $arch  $(sha "$d/ntdll.dll" | cut -c1-16)  $d/ntdll.dll"
 done
-echo "==> RUN_SCRIPT copies these into the CrossOver tree on the next Steam launch"
+echo "==> setting build $BUILD up in NotProton copies these into its runner clone"

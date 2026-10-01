@@ -39,7 +39,7 @@ enum SupportPaths {
 
     static var deployedVersion: URL { support.appending(path: "dylib.version") }
 
-    static var currentRunner: URL { runners.appending(path: "current") }
+    static var toolList: URL { support.appending(path: "tools") }
 
     static func runnerRoot(forBuild build: String, runners: URL = SupportPaths.runners) -> URL {
         runners.appending(path: "crossover-\(build)")
@@ -81,8 +81,13 @@ enum SupportPaths {
         static var innerConfigFile: URL { innerClient.appending(path: "steam.cfg") }
         static var legacyCompat: URL { innerClient.appending(path: "legacycompat") }
 
-        static var compatTool: URL {
-            userData.appending(path: "compatibilitytools.d/notproton")
+        static var compatTools: URL { userData.appending(path: "compatibilitytools.d") }
+
+        static func notprotonTools(in directory: URL = compatTools) -> [URL] {
+            let entries = (try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil
+            )) ?? []
+            return entries.filter { $0.lastPathComponent.hasPrefix("notproton") }
         }
 
         static var libraryFoldersVDF: URL { userData.appending(path: "steamapps/libraryfolders.vdf") }

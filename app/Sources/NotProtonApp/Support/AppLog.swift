@@ -75,11 +75,9 @@ enum AppLog {
     private static func describe(_ runner: RunnerState) -> String {
         switch runner {
         case .none: "not set up"
-        case .cloned(let build, let supported): "cloned \(build) supported=\(supported)"
-        case .bundleShaped(let build): "cloned \(build) in an .app"
+        case .ready(let builds): "ready \(builds.joined(separator: ", "))"
         case .unpatched(let build, let problems):
             "cloned \(build) unpatched: \(problems.joined(separator: ", "))"
-        case .broken(let detail): "broken: \(detail)"
         }
     }
 

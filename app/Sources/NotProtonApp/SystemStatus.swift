@@ -33,6 +33,7 @@ struct StatusSnapshot: Sendable {
         }
 
         let runner = RunnerStore.state()
+        let installed = RunnerStore.installedBuilds()
 
         return StatusSnapshot(
             steam: SteamBundle.deployment(bundledVersion: bundledVersion),
@@ -41,10 +42,8 @@ struct StatusSnapshot: Sendable {
             crossOver: installs,
             crossOverLicense: licenses,
             runner: runner,
-            payload: PayloadInspector.inspect(
-                build: runner.buildIdentifier.flatMap(SupportedRunners.build(id:))
-            ),
-            installedRunners: RunnerStore.installedBuilds(),
+            payload: PayloadInspector.inspect(builds: installed),
+            installedRunners: installed,
             orphanedRunners: RunnerStore.orphanedClones(),
             damagedRunners: RunnerStore.damagedClones()
         )
@@ -133,47 +132,33 @@ final class SystemStatus {
         snapshot?.crossOver.filter(\.isUsable) ?? []
     }
 
-    var crossOverRowsOfferSetUp: Bool {
-        let usable = usableCrossOvers
-        guard usable.count > 1 else { return false }
-        let installed = snapshot?.installedRunners ?? []
-        return usable.contains { install in
-            if case .supported(let build) = install.support { return !installed.contains(build) }
-            return false
-        }
-    }
-
-    struct AvailableBuild: Identifiable {
-        let install: CrossOverInstall
-        let build: RunnerBuild
-
-        var id: String { build.id }
+    var crossOverRows: [CrossOverRow] {
+        guard let snapshot else { return [] }
+        var unpatched: String?
+        if case .unpatched(let build, _) = snapshot.runner { unpatched = build }
+        return CrossOverRow.rows(
+            installs: snapshot.crossOver,
+            licenses: snapshot.crossOverLicense,
+            installed: snapshot.installedRunners,
+            damaged: snapshot.damagedRunners,
+            orphaned: snapshot.orphanedRunners,
+            unpatched: unpatched
+        )
     }
 
     var repairSource: CrossOverInstall? {
-        let current = snapshot?.runner.buildIdentifier
-        return usableCrossOvers.first { install in
-            if case .supported(let build) = install.support { return build.id == current }
-            return false
+        let builds = snapshot?.runner.builds ?? []
+        for wanted in builds {
+            let found = usableCrossOvers.first { install in
+                if case .supported(let build) = install.support { return build.id == wanted }
+                return false
+            }
+            if let found { return found }
         }
+        return nil
     }
 
     var setupSource: CrossOverInstall? { repairSource ?? usableCrossOver }
-
-    var setupSourceIsDeployed: Bool {
-        guard case .supported(let build)? = setupSource?.support else { return false }
-        return snapshot?.installedRunners.contains(build) ?? false
-    }
-
-    var availableBuilds: [AvailableBuild] {
-        let installed = snapshot?.installedRunners ?? []
-        guard !installed.isEmpty else { return [] }
-        return usableCrossOvers.compactMap { install in
-            guard case .supported(let build) = install.support,
-                  !installed.contains(build) else { return nil }
-            return AvailableBuild(install: install, build: build)
-        }
-    }
 
     func checkLicense(for chosen: CrossOverInstall? = nil) async -> CrossOverLicense.Status? {
         guard let install = chosen ?? usableCrossOver else { return nil }
@@ -248,34 +233,21 @@ final class SystemStatus {
         guard let build = pendingRemoval else { return }
         pendingRemoval = nil
         await perform(from: RunnerInstaller.removeStep) { _ in
-            try await Task.detached(priority: .userInitiated) {
+            let changed = try await Task.detached(priority: .userInitiated) {
                 try RunnerInstaller.removeClone(forBuild: build)
             }.value
-            return "Removed build \(SupportedRunners.displayVersion(forID: build))."
+            let removed = "Removed build \(SupportedRunners.displayVersion(forID: build))."
+            return changed && SteamBundle.isRunning ? "\(removed) \(Self.toolsRestartHint)" : removed
         }
     }
 
-    func switchRunner(to build: RunnerBuild) async {
-        guard isIdle else { return }
-        guard build.id != snapshot?.runner.buildIdentifier else { return }
-        await perform(from: RunnerSetup.Phase.staging.label) { progress in
-            let result = try await Task.detached(priority: .userInitiated) {
-                try RunnerSetup.activate(build, report: { progress($0.label) })
-            }.value
-            return "Now using build \(result.build.displayVersion)."
-        }
-    }
-
-    var chosenCrossOver: URL? { CrossOverSource.manualBundle }
-
-    // Lets the user pick a copy of CrossOver the search did not find/auto-select
-    func chooseCrossOver() async {
+    func addCrossOver() async {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.application]
-        panel.prompt = "Choose"
+        panel.prompt = "Add"
         panel.message = "Select a copy of CrossOver."
         panel.directoryURL = URL(filePath: "/Applications", directoryHint: .isDirectory)
 
@@ -290,21 +262,31 @@ final class SystemStatus {
             return
         }
 
-        CrossOverSource.manualBundle = picked
-        AppLog.note("crossOver choice: \(picked.path(percentEncoded: false))")
+        let found = snapshot?.crossOver.contains {
+            $0.bundle.standardizedFileURL == picked.standardizedFileURL
+        } ?? false
+        if !found {
+            CrossOverSource.addManualBundle(picked)
+            AppLog.note("crossOver added: \(picked.path(percentEncoded: false))")
+        }
         await refresh()
     }
 
-    func clearCrossOverChoice() async {
+    func removeFromList(_ install: CrossOverInstall) async {
+        guard isIdle else { return }
         clearFailure()
         outcome = nil
-        CrossOverSource.manualBundle = nil
-        AppLog.note("crossOver choice cleared")
+        CrossOverSource.removeManualBundle(install.bundle)
+        AppLog.note("crossOver removed from list: \(install.id)")
         await refresh()
     }
 
+    private static let toolsRestartHint = "Restart Steam to update its list of compatibility tools."
+
     private func runnerOutcome(_ result: RunnerSetup.Outcome) -> String {
-        result.stagedNothing ? "Compatibility tool is already set up." : "Compatibility tool ready."
+        if result.stagedNothing { return "Compatibility tool is already set up." }
+        guard result.toolsChanged, SteamBundle.isRunning else { return "Compatibility tool ready." }
+        return "Compatibility tool ready. \(Self.toolsRestartHint)"
     }
 
     func perform(
@@ -442,7 +424,15 @@ final class SystemStatus {
 
         let version = AppVersion.bundled
         let captured = await Task.detached(priority: .userInitiated) {
-            StatusSnapshot.capture(bundledVersion: version)
+            do {
+                if try CompatToolList.sync() { AppLog.note("tool list rewritten") }
+            } catch {
+                AppLog.note("tool list not written: \(error.localizedDescription)")
+            }
+            for failure in NtdllPatcher.stageInstalled() {
+                AppLog.note("ntdll for \(failure.build) not staged: \(failure.error.localizedDescription)")
+            }
+            return StatusSnapshot.capture(bundledVersion: version)
         }.value
         snapshot = captured
         AppLog.note(captured)

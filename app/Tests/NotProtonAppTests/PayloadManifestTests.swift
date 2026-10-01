@@ -88,7 +88,8 @@ struct PayloadInspectionTests {
             try Data().write(to: file)
         }
 
-        let state = PayloadInspector.inspect(bridge: bridge)
+        let fex = try #require(SupportedRunners.all.first { $0.flavor == "fex" })
+        let state = PayloadInspector.inspect(bridge: bridge, builds: [fex])
         #expect(state.manifestProblem == nil)
         #expect(state.expected == 20)
         #expect(state.present == 10)

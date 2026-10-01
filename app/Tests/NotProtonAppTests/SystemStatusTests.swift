@@ -421,7 +421,7 @@ struct ActivationQuestionTests {
     func installWithToolAsksNothing() {
         #expect(
             SystemStatus.activationQuestion(
-                .install, licensed: false, runner: .cloned(build: "27.0.0.40921", supported: true)
+                .install, licensed: false, runner: .ready(builds: ["27.0.0.40921"])
             ) == nil
         )
     }
@@ -435,7 +435,7 @@ struct ActivationQuestionTests {
     // whatever is already set up.
     @Test("Setting up the tool asks whenever CrossOver is unactivated")
     func unactivatedToolAsks() {
-        for runner in [RunnerState.none, .cloned(build: "27.0.0.40921", supported: true)] {
+        for runner in [RunnerState.none, .ready(builds: ["27.0.0.40921"])] {
             #expect(
                 SystemStatus.activationQuestion(.compatibilityTool, licensed: false, runner: runner)
                     == .toolUnlicensed

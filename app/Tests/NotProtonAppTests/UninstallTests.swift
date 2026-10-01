@@ -26,6 +26,12 @@ struct UninstallTests {
         let support: URL
         let caches: URL
 
+        var compatTools: [URL] {
+            SupportPaths.Steam.notprotonTools(in: compatTool.deletingLastPathComponent())
+        }
+        var secondTool: URL { compatTool.deletingLastPathComponent().appending(path: "notproton-26.3") }
+        var foreignTool: URL { compatTool.deletingLastPathComponent().appending(path: "GE-Proton9-1") }
+
         var outerPlist: URL { app.appending(path: "Contents/Info.plist") }
         var dylib: URL { app.appending(path: "Contents/MacOS/\(SupportPaths.dylibName)") }
     }
@@ -41,7 +47,9 @@ struct UninstallTests {
         let support = root.appending(path: "notproton")
         let caches = root.appending(path: "valve-packages")
 
-        for dir in [macOS, inner, legacyCompat, compatTool, support, caches] {
+        let tools = compatTool.deletingLastPathComponent()
+        for dir in [macOS, inner, legacyCompat, compatTool, support, caches,
+                    tools.appending(path: "notproton-26.3"), tools.appending(path: "GE-Proton9-1")] {
             try files.createDirectory(at: dir, withIntermediateDirectories: true)
         }
 
@@ -198,7 +206,7 @@ struct UninstallTests {
             innerPlist: layout.innerPlist,
             updateBlocks: [layout.updateBlock],
             legacyCompat: layout.legacyCompat,
-            compatTool: layout.compatTool,
+            compatTools: layout.compatTools,
             directories: [layout.support, layout.caches],
             repair: { _ in throw Offline() },
             stop: { _ in false }
@@ -214,6 +222,8 @@ struct UninstallTests {
             !files.fileExists(atPath: layout.compatTool.path(percentEncoded: false)),
             "Steam would still list the tool in its dropdown after a removal"
         )
+        #expect(!files.fileExists(atPath: layout.secondTool.path(percentEncoded: false)))
+        #expect(files.fileExists(atPath: layout.foreignTool.path(percentEncoded: false)))
         #expect(unpinnedWithoutLosingTheRest(layout.updateBlock))
     }
 
@@ -229,7 +239,7 @@ struct UninstallTests {
             innerPlist: layout.innerPlist,
             updateBlocks: [layout.updateBlock],
             legacyCompat: layout.legacyCompat,
-            compatTool: layout.compatTool,
+            compatTools: layout.compatTools,
             directories: [layout.support, caches],
             repair: { _ in
                 let staged = caches.appending(path: "bundle")
@@ -256,7 +266,7 @@ struct UninstallTests {
             innerPlist: layout.innerPlist,
             updateBlocks: [layout.updateBlock],
             legacyCompat: layout.legacyCompat,
-            compatTool: layout.compatTool,
+            compatTools: layout.compatTools,
             directories: [layout.support, layout.caches],
             report: { log.add($0) },
             repair: { report in

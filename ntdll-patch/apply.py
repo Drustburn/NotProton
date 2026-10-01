@@ -7,7 +7,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from resolve import PE, resolve, shell_vars  # noqa: E402
+from resolve import PE, SECTION_FLAGS, SECTION_NAME, SECTION_SIZE, resolve, shell_vars  # noqa: E402
 
 # A new build needs its ntdll hash added here and in build-ntdll.sh.
 PAYLOAD_BY_CLEAN_SHA = {
@@ -16,6 +16,8 @@ PAYLOAD_BY_CLEAN_SHA = {
     "f4fa556a3dc20f6e966a803f5de554359227a61a24cd5b5a2ad88a427ceeec58": "detour2-fex.bin",
     "09474795d6f306163cebab6429819999fcff50e07dbc4b067a90ec4f74a3a7d7": "detour32-fex.bin",
     "7823d71fbce6c9947163bf8b96beb299eabb02878245bcaf6759f2a22e81f071": "detour64-fex.bin",
+    "6dff64c00793ce92124f1316985c63783f539f26b392975c70f57637458d2387": "detour2-cx26.bin",
+    "2c60ee6b00dd13b7f6cb11017778a041ba6a321eaea194f1fa0dca7eab8403e2": "detour32-cx26.bin",
 }
 
 UNAMBIGUOUS_PAYLOAD = {0xaa64: "detour64-fex.bin"}
@@ -32,6 +34,20 @@ def default_payload(src, machine):
     raise SystemExit(f"{src}: sha256 {digest} matches no known clean ntdll, and machine "
                      f"{machine:#x} has more than one detour, pass payload.bin as the "
                      f"third argument")
+
+
+def append_section(pe, d, r):
+    """Grows the image by one executable section and returns its file offset."""
+    import struct
+    raw = r['rawOffset']
+    e = struct.unpack_from('<I', d, 0x3c)[0]
+    d[pe.table_end:pe.table_end + 40] = struct.pack(
+        '<8sIIIIIIHHI', SECTION_NAME, SECTION_SIZE, r['caveRVA'], SECTION_SIZE, raw,
+        0, 0, 0, 0, SECTION_FLAGS)
+    struct.pack_into('<H', d, e + 6, struct.unpack_from('<H', d, e + 6)[0] + 1)
+    struct.pack_into('<I', d, pe.opt + 56, r['caveRVA'] + SECTION_SIZE)
+    d.extend(b"\0" * (raw + SECTION_SIZE - len(d)))
+    return raw
 
 
 def main():
@@ -54,7 +70,10 @@ def main():
 
     pe = PE(src)
     d = bytearray(pe.d)
-    cave_off = pe.off(payload_rva)
+    if r['placement'] == 'section':
+        cave_off = append_section(pe, d, r)
+    else:
+        cave_off = pe.off(payload_rva)
 
     if any(b != fill for b in d[cave_off:cave_off + len(detour)]):
         raise SystemExit(f"cave at {cave_off:#x} is not {fill:#02x} pad for {len(detour)} bytes")

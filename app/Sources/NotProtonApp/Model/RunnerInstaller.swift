@@ -43,21 +43,44 @@ enum RunnerInstaller {
 
     static let removeStep = "Remove build"
 
-    static func removeClone(forBuild build: String, runners: URL = SupportPaths.runners) throws {
+    @discardableResult
+    static func removeClone(
+        forBuild build: String,
+        runners: URL = SupportPaths.runners,
+        bridge: URL = SupportPaths.bridge,
+        toolList: URL = SupportPaths.toolList,
+        compatTools: URL = SupportPaths.Steam.compatTools,
+        running: (URL) -> Bool = { RunnerInstaller.isRunning(from: $0) }
+    ) throws -> Bool {
         let target = SupportPaths.runnerRoot(forBuild: build, runners: runners)
         let path = target.path(percentEncoded: false)
 
         guard FileManager.default.fileExists(atPath: path) else {
             throw StepFailure(step: removeStep, detail: "Build \(build) is not set up.")
         }
-        guard RunnerStore.currentBuild(runners: runners) != build else {
+        guard !running(target) else {
             throw StepFailure(
                 step: removeStep,
-                detail: "Build \(build) is the active build. Switch to another build first."
+                detail: "A game or Wine tool is still running on build \(build). Quit it first."
             )
         }
 
         try WriteRefused.catching(path) { try FileManager.default.removeItem(at: target) }
+        return try CompatToolList.sync(
+            runners: runners, bridge: bridge, file: toolList, compatTools: compatTools
+        )
+    }
+
+    // Wine keeps a wineserver running inside the clone, so a process running from there is a
+    // live session.
+    static func isRunning(from clone: URL, ps: String = "/bin/ps") -> Bool {
+        guard let result = try? Shell.run(ps, ["-axww", "-o", "comm="]), result.succeeded
+        else { return true }
+        let root = clone.standardizedFileURL.path(percentEncoded: false)
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        return result.stdout.split(separator: "\n").contains {
+            $0.trimmingCharacters(in: .whitespaces).hasPrefix(prefix)
+        }
     }
 
     static func hasClone(forBuild build: String, runners: URL = SupportPaths.runners) -> Bool {
@@ -112,23 +135,5 @@ enum RunnerInstaller {
         }
 
         try CrossOverSource.verifyPatchInputs(root: root, build: build)
-    }
-
-    static func pointCurrent(atBuild build: String, runners: URL = SupportPaths.runners) throws {
-        let fm = FileManager.default
-        let relative = "crossover-\(build)/CrossOver"
-        let staging = runners.appending(path: ".current.new")
-
-        try? fm.removeItem(at: staging)
-        try fm.createSymbolicLink(
-            atPath: staging.path(percentEncoded: false), withDestinationPath: relative
-        )
-
-        let current = runners.appending(path: "current").path(percentEncoded: false)
-        if rename(staging.path(percentEncoded: false), current) != 0 {
-            let reason = String(cString: strerror(errno))
-            try? fm.removeItem(at: staging)
-            throw StepFailure(step: step, detail: "Could not point the compatibility tool at \(relative). \(reason)")
-        }
     }
 }

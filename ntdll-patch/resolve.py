@@ -37,6 +37,19 @@ PINNED = {
          'exports': {'LdrGetDllHandle': 0x7bc2a6b0, 'LdrLoadDll': 0x7bc286d0,
                      'NtProtectVirtualMemory': 0x7bc4d020, 'NtOpenFile': 0x7bc4ce50,
                      'NtReadFile': 0x7bc4cb80, 'NtClose': 0x7bc4cc10}},
+    '6dff64c00793ce92124f1316985c63783f539f26b392975c70f57637458d2387':
+        {'hookRVA': 0x44972, 'stolen': '4883bc24f000000000', 'caveRVA': 0xae000, 'caveSize': 4096,
+         'wm': 'r14', 'resume': 0x4497b, 'load_path': 0xd0,
+         'payload': 'e35b834408599c45f30b23a6d2bf38acfa5c3df4d15206617c471e23a4a01bfb',
+         'exports': {'LdrGetDllHandle': 0x170014bc0, 'LdrLoadDll': 0x170015680,
+                     'NtProtectVirtualMemory': 0x17000f380}},
+    '2c60ee6b00dd13b7f6cb11017778a041ba6a321eaea194f1fa0dca7eab8403e2':
+        {'hookRVA': 0x43b40, 'stolen': 'f645c0017526', 'caveRVA': 0xaa000, 'caveSize': 4096,
+         'resume': 0x43b46, 'wm': 'esi', 'load_path': -0x54,
+         'payload': 'be465bc936cafafae4aa1b4c41f668e08848492d9858c2cf2ad483a9f1ab25e5',
+         'exports': {'LdrGetDllHandle': 0x7bc12c60, 'LdrLoadDll': 0x7bc13750,
+                     'NtProtectVirtualMemory': 0x7bc0d584, 'NtOpenFile': 0x7bc0d3b4,
+                     'NtReadFile': 0x7bc0d0e4, 'NtClose': 0x7bc0d174}},
     '7823d71fbce6c9947163bf8b96beb299eabb02878245bcaf6759f2a22e81f071':
         {'caveRVA': 0xf1185, 'caveSize': 61051,
          # This image carries the loader twice, once for the native side and once for the
@@ -56,6 +69,7 @@ PINNED = {
 }
 EXPORTS = ['LdrGetDllHandle', 'LdrLoadDll', 'NtProtectVirtualMemory',
            'NtOpenFile', 'NtReadFile', 'NtClose']
+SECTION_NAME, SECTION_SIZE, SECTION_FLAGS = b'.npdet', 0x1000, 0x60000020
 PROLOGUES = [rb'\x55\x89\xe5', rb'\x55\x8b\xec']
 NOP64 = bytes.fromhex('1f2003d5')
 
@@ -87,6 +101,9 @@ class PE:
             if roff:
                 self.secs.append((name, vrva, vsize, roff, rsize))
         self.dirs = self.opt + (112 if wide else 96)
+        self.table_end = e + 24 + optsz + nsec * 40
+        self.sect_align, self.file_align = struct.unpack_from('<II', self.d, self.opt + 32)
+        self.size_of_image, self.size_of_headers = struct.unpack_from('<II', self.d, self.opt + 56)
 
     def sec(self, prefix):
         for s in self.secs:
@@ -142,7 +159,17 @@ class PE:
         # at the end that the loader maps but nothing touches. Detour goes there.
         _, vrva, vsize, roff, rsize = self.sec('.text')
         end = vrva + vsize
-        return {'caveRVA': end, 'caveSize': (vrva + rsize) - end, 'fill': self.d[roff + vsize]}
+        return {'caveRVA': end, 'caveSize': (vrva + rsize) - end, 'fill': self.d[roff + vsize],
+                'placement': 'padding'}
+
+    def appended(self):
+        # The section is mapped at SizeOfImage, and its raw data goes after everything else in
+        # the file, the certificate included.
+        if self.table_end + 40 > self.size_of_headers or any(self.d[self.table_end:self.table_end + 40]):
+            raise SystemExit(f"{self.path}: no free section header slot after the table")
+        raw = (len(self.d) + self.file_align - 1) & ~(self.file_align - 1)
+        return {'caveRVA': self.size_of_image, 'caveSize': SECTION_SIZE, 'fill': 0,
+                'placement': 'section', 'rawOffset': raw}
 
     def string_refs(self, name):
         """RVAs of instructions referencing a .rdata C string, however the arch addresses it."""
@@ -285,13 +312,14 @@ def resolve_i386(pe):
         raise SystemExit(f"{pe.path}: no MODREF flag test in build_module")
     wm = re.search(r'\[(e\w\w) \+ 0x37\]', body[anchor].op_str).group(1)
 
-    # The module flags are tested for bit 2 just above. Either the value is still in memory
-    # or the compiler loaded it first, in which case that load starts the hook.
+    # The module flags are tested just above, with bit 2 in Wine 11.15 and bit 1 in 11.0.
+    # Either the value is still in memory or the compiler loaded it first, in which case that
+    # load starts the hook.
     gate = None
     for k in range(anchor - 1, max(anchor - 24, 0), -1):
         i = body[k]
         if i.mnemonic == 'test' and i.operands and i.operands[-1].type == X86.X86_OP_IMM \
-                and i.operands[-1].imm == 2:
+                and i.operands[-1].imm in (1, 2):
             gate = k
             break
     if gate is None:
@@ -347,7 +375,7 @@ def resolve_i386(pe):
             'insn': ' ; '.join(f"{i.mnemonic} {i.op_str}" for i in taken),
             'load_path': load_path, 'skip': skip, 'stole_branch': stole_branch,
             'stolen_head': b''.join(i.bytes for i in (taken[:-1] if stole_branch else taken)).hex(),
-            'flags_slot': flags_slot}
+            'flags_slot': flags_slot, 'flags_bit': body[gate].operands[-1].imm}
 
 
 def aarch64_walk(md, text, tv):
@@ -549,6 +577,8 @@ def resolve(path):
     r = (resolve_aarch64(pe) if pe.machine == 0xaa64 else
          resolve_amd64(pe) if pe.machine == 0x8664 else resolve_i386(pe))
     r.update(pe.cave())
+    if r['caveSize'] < PAYLOAD[pe.machine]:
+        r.update(pe.appended())
     r['machine'], r['magic'], r['imageBase'] = pe.machine, pe.magic, pe.imagebase
     ex = pe.exports()
     r['exports'] = {n: pe.imagebase + ex[n] for n in EXPORTS if n in ex}
@@ -599,6 +629,7 @@ def report(path):
     line('caveRVA', r['caveRVA'], 'caveRVA')
     line('caveSize', r['caveSize'], 'caveSize', fmt=str)
     need = PAYLOAD[r['machine']]
+    print(f"  {'placement':13} {r['placement']}")
     print(f"  {'cave fill':13} {r['fill']:#02x}   room {r['caveSize']} bytes, payload {need}"
           f" -> {'fits' if r['caveSize'] >= need else 'TOO SMALL'}")
     def table(items, want):
@@ -664,6 +695,7 @@ def shell_vars(path):
         'NP_CAVE_RVA': f"{r['caveRVA']:#x}", 'NP_CAVE_SIZE': str(r['caveSize']),
         'NP_PAYLOAD_RVA': f"{payload:#x}", 'NP_PAYLOAD_VA': f"{r['imageBase'] + payload:#x}",
         'NP_CAVE_ROOM': str(room), 'NP_FILL': f"{r['fill']:#04x}",
+        'NP_PLACEMENT': r['placement'],
     }
     if PINNED.get(r['sha256'], {}).get('payload'):
         out['NP_PAYLOAD_SHA256'] = PINNED[r['sha256']]['payload']
@@ -673,6 +705,7 @@ def shell_vars(path):
         out['NP_STOLEN_HEAD_BYTES'] = ','.join(
             f"0x{b:02x}" for b in bytes.fromhex(r['stolen_head']))
         out['NP_FLAGS_SLOT'] = ('%#x' if r['flags_slot'] >= 0 else '-%#x') % abs(r['flags_slot'])
+        out['NP_FLAGS_BIT'] = f"{r['flags_bit']:#x}"
 
     for n, s in enumerate(r.get('sites') or [], 1):
         out[f'NP_HOOK_RVA_{n}'] = f"{s['hookRVA']:#x}"

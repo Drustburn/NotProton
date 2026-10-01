@@ -28,6 +28,8 @@ struct RunnerBuild: Sendable, Equatable, Identifiable {
     let cleanNtdll: [WineArch: String]
     let patchedNtdll: [WineArch: String]
 
+    var tools: [CompatTool] = []
+
     var id: String { flavor.map { "\(bundleVersion)-\($0)" } ?? bundleVersion }
 
     var flavorName: String { flavor?.uppercased() ?? "Rosetta" }
@@ -35,9 +37,89 @@ struct RunnerBuild: Sendable, Equatable, Identifiable {
     var displayVersion: String { "\(releaseVersion) \(flavorName)" }
 }
 
+struct CompatTool: Sendable, Hashable, Identifiable {
+    enum Flavor: String, Sendable {
+        case fex
+        case rosetta
+    }
+
+    let name: String
+    let flavor: Flavor
+    let display: String
+
+    var id: String { name }
+
+    var prefixArch: PrefixArch { flavor == .fex ? .arm64 : .x86_64 }
+}
+
+struct InstalledTool: Sendable, Hashable, Identifiable {
+    let tool: CompatTool
+    let build: String
+
+    var id: String { tool.name }
+    var name: String { tool.name }
+    var display: String { tool.display }
+}
+
 enum SupportedRunners {
 
+    // First entry is what windows-only games get when Steam has no mapping.
+    static let toolPreference = [
+        legacyToolName, "notproton-fex", "notproton-fex-rosetta", "notproton-preview", "notproton-26.3",
+    ]
+
+    static let legacyToolName = "notproton"
+
+    // The only builds that can own the 'notproton' tool name.
+    static let legacyHolders = ["27.0.0.40921-fex", "27.0.0.40921"]
+
+    enum LegacyHolder: Equatable, Sendable {
+        case preferred
+        case build(String)
+        case nobody
+    }
+
+    static func tools(for builds: [RunnerBuild], legacy: LegacyHolder = .preferred) -> [InstalledTool] {
+        let installed = Set(builds.map(\.id))
+        let holder: String? = switch legacy {
+        case .preferred: legacyHolders.first(where: installed.contains)
+        case .build(let id): id
+        case .nobody: nil
+        }
+        let served = all.filter { installed.contains($0.id) }.flatMap { build in
+            build.tools.enumerated().map { index, tool in
+                let name = build.id == holder && index == 0 ? legacyToolName : tool.name
+                return InstalledTool(
+                    tool: CompatTool(name: name, flavor: tool.flavor, display: tool.display), build: build.id
+                )
+            }
+        }
+        func rank(_ tool: InstalledTool) -> Int {
+            toolPreference.firstIndex(of: tool.name) ?? toolPreference.count
+        }
+        return served.enumerated()
+            .sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }
+            .map(\.element)
+    }
+
     static let all: [RunnerBuild] = [
+        RunnerBuild(
+            bundleVersion: "26.3.0.39832",
+            releaseVersion: "26.3",
+            flavor: nil,
+            loaderSHA256: "b5edb0444b5b25ba0aa5091be1cba11680130895c338cc8044101bce98802a63",
+            cleanNtdll: [
+                .x86_64Windows: "6dff64c00793ce92124f1316985c63783f539f26b392975c70f57637458d2387",
+                .i386Windows: "2c60ee6b00dd13b7f6cb11017778a041ba6a321eaea194f1fa0dca7eab8403e2",
+            ],
+            patchedNtdll: [
+                .x86_64Windows: "c0e21a9a5250f0a97c08d3c3e1798566255387213e2553b1e555264fb9ded97e",
+                .i386Windows: "e641d7b2e81ee13877823494679ba2d87e0d61b8a87e8a1ce92b4fe73631ae74",
+            ],
+            tools: [
+                CompatTool(name: "notproton-26.3", flavor: .rosetta, display: "CrossOver 26.3"),
+            ]
+        ),
         RunnerBuild(
             bundleVersion: "27.0.0.40921",
             releaseVersion: "20260821",
@@ -50,6 +132,9 @@ enum SupportedRunners {
             patchedNtdll: [
                 .x86_64Windows: "b6a98622fb8f7e6a998bc038f442b17d257da3df5e9e135f0c35f7bbc46ea5d6",
                 .i386Windows: "25bfde1f50ee96485763968ef10b9d9ad35e38214232f17ebdc009b098af44a0",
+            ],
+            tools: [
+                CompatTool(name: "notproton-preview", flavor: .rosetta, display: "CrossOver Preview (Rosetta-only version)"),
             ]
         ),
         RunnerBuild(
@@ -66,6 +151,10 @@ enum SupportedRunners {
                 .x86_64Windows: "fa8cd8fe7c4c19effade92d55b00fa946b630ab13cbb6721076848238c1dcf6a",
                 .i386Windows: "e799ea02418294588ee353a90b967358be316a3044ff9515b28aa1ce07e63981",
                 .aarch64Windows: "f40810193a5ef2520774288f354a8604f5ba91828315f643b3ee6688b873dc3f",
+            ],
+            tools: [
+                CompatTool(name: "notproton-fex", flavor: .fex, display: "CrossOver Preview (FEX)"),
+                CompatTool(name: "notproton-fex-rosetta", flavor: .rosetta, display: "CrossOver Preview (Rosetta)"),
             ]
         ),
     ]
