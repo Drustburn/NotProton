@@ -60,7 +60,7 @@ DEPS := $(OBJS:.o=.d)
         tests-list overlay-shim overlay-shim-install overlay-shim-tests \
         overlay-shim-bench iconmaker icon \
         appinfo helpers-install ntdll-resolve bridge runcheck compatcheck \
-        compatsvc-check scriptcheck
+        compatsvc-check scriptcheck FORCE
 
 APP_PAYLOAD := app/Sources/NotProtonApp/Resources/payload
 
@@ -130,7 +130,7 @@ ANCHORCHECK_SRCS := dylib/tests/anchorcheck.c \
 	dylib/resolver/resolver.c dylib/resolver/sigdb.c \
 	dylib/util/log.c dylib/util/file.c vendor/cJSON.c
 
-$(ANCHORCHECK): $(ANCHORCHECK_SRCS)
+$(ANCHORCHECK): $(ANCHORCHECK_SRCS) FORCE
 	@mkdir -p $(dir $@)
 	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g -O1 \
 	  -Wall -Wextra -Wno-unused-parameter -Idylib -Ivendor \
@@ -542,3 +542,5 @@ clean:
 rebuild: clean all
 
 -include $(DEPS)
+
+FORCE:

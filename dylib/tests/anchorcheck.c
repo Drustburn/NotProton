@@ -316,7 +316,7 @@ static int pick_live(const dbcheck_t *dbs, int n) {
     return best_hits ? best : -1;
 }
 
-static int report_db(const dbcheck_t *db, int is_live) {
+static int report_db(const dbcheck_t *db, int is_live, int misses_excused) {
     int bad = 0;
 
     printf("%s  build %llu%s\n", db->path, (unsigned long long)db->build,
@@ -330,7 +330,7 @@ static int report_db(const dbcheck_t *db, int is_live) {
         else if (!r->anchor)                   { verdict = (r->has_pattern && r->aob)
                                                              ? "ANCHOR FAILED (aob resolves)"
                                                              : "ANCHOR FAILED";
-                                                 if (is_live) bad++; }
+                                                 if (!misses_excused) bad++; }
         else if (!is_live)                     { verdict = (r->has_pattern && r->aob && r->aob != r->anchor)
                                                              ? "stale pattern hit elsewhere"
                                                              : "resolved";           }
@@ -423,7 +423,7 @@ int main(int argc, char **argv) {
     int live = pick_live(dbs, n);
 
     int bad = 0;
-    for (int i = 0; i < n; i++) bad += report_db(&dbs[i], i == live);
+    for (int i = 0; i < n; i++) bad += report_db(&dbs[i], i == live, live >= 0 && i != live);
     bad += report_cross_db(dbs, n);
 
     if (live < 0) {
