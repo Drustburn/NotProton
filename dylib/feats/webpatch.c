@@ -252,6 +252,16 @@ static const np_gate_t g_fixes[] = {
     { "{strFileTypeName:\"Image Files (*.tga,*.png)\",rFilePatterns:[\"*.tga\",\"*.png\"]}",
       "{strFileTypeName:\"Image Files (*.tga,*.png,*.exe)\","
       "rFilePatterns:[\"*.tga\",\"*.png\",\"*.exe\"]}", 1 },
+    // Makes Steam's default compatibility tool setting work
+    { "r=(0,s.q3)(()=>u.rV.settings.bCompatEnabled),a=function(e,t){const[r,i]=n.useState([]);"
+      "return n.useEffect(()=>{SteamClient.Apps.GetAvailableCompatTools(e).then(i)},[e,t]),r}"
+      "(t.unAppID,r),o=r&&!!t.strCompatToolName&&t.nCompatToolPriority==h.JN,"
+      "l=a.length?a[0].strToolName:\"\"",
+      "r=(0,s.q3)(()=>u.rV.settings.bCompatEnabled),a=function(e,t){const[r,i]=n.useState([]);"
+      "return n.useEffect(()=>{SteamClient.Apps.GetAvailableCompatTools(e).then(i)},[e,t]),r}"
+      "(t.unAppID,r),o=r&&!!t.strCompatToolName&&t.nCompatToolPriority==h.JN,"
+      "l=a.length?(a.find(e=>e.strToolName===u.rV.settings.strCompatTool)||a[0]).strToolName:\"\"",
+      1 },
 };
 #define NP_FIX_COUNT (sizeof(g_fixes) / sizeof(g_fixes[0]))
 
