@@ -1338,8 +1338,6 @@ static HANDLE run_process(BOOL *should_await, BOOL game_process)
 
         dos = wine_get_dos_file_name(scratchA);
 
-        CoInitialize(NULL);
-
         console = SHGetFileInfoW(dos, 0, &sfi, sizeof(sfi), SHGFI_EXETYPE);
         if (console)
         {
