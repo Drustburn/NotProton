@@ -116,9 +116,12 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     ARG "=>{" \
     "const t=" ARG ".details,o=t.strLaunchOptions||\"\"," \
     "g=k=>{const p=o.split(\" \").find(x=>x.indexOf(k+\"=\")===0);return p?p.slice(k.length+1):\"\"}," \
-    "s=ps=>{const a=o.split(\" \").filter(x=>x&&!ps.some(p=>x.indexOf(p[0]+\"=\")===0));" \
-    "ps.forEach(p=>{if(p[1])a.unshift(p[0]+\"=\"+p[1])});" \
-    "SteamClient.Apps.SetAppLaunchOptions(t.unAppID,a.join(\" \"))}," \
+    "s=ps=>{const a=o.split(\" \").filter(x=>x&&!ps.some(p=>x.indexOf(p[0]+\"=\")===0))," \
+    "v=ps.filter(p=>p[1]).map(p=>p[0]+\"=\"+p[1]);" \
+    "if(v.length&&a.indexOf(\"%command%\")<0)v.push(\"%command%\");" \
+    "const r=v.concat(a);" \
+    "SteamClient.Apps.SetAppLaunchOptions(t.unAppID," \
+    "1===r.length&&\"%command%\"===r[0]?\"\":r.join(\" \"))}," \
     "T=(ks,l,on,off)=>(0," RT ".jsx)(" BARREL ".Yh,{className:\"MSCXRow\",label:l," \
     "checked:g(ks[0])===on," \
     "onChange:v=>s(ks.map(k=>[k,v?on:(off||\"\")]))},ks[0])," \

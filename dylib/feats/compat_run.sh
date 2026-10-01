@@ -5,24 +5,10 @@ set -e
 verb="$1"
 shift || true
 
-# Options set from the Compatibility page are passed along as
-# launch options.
-launch_env=""
-argc=$#
-argi=0
-while [ "$argi" -lt "$argc" ]; do
-  arg="$1"
-  shift
-  case "$arg" in
-    CX_GRAPHICS*=*|D3DM_*=*|DXMT_*=*|DXVK_*=*|MTL_*=*|NOTPROTON_*=*|ROSETTA_*=*|WINE*=*)
-      # shellcheck disable=SC2163 # arg is a NAME=VALUE pair, which export takes as an assignment
-      export "$arg"
-      launch_env="$launch_env $arg"
-      ;;
-    *) set -- "$@" "$arg" ;;
-  esac
-  argi=$((argi+1))
-done
+# hook_launch.c passes the launch options through a shell before this script runs, matching
+# Linux Steam. A NAME=value option placed ahead of %command% is an environment variable,
+# and anything after %command% is a launch argument passed to the game.
+launch_args="$*"
 
 case "$verb" in
   getcompatpath)
@@ -53,7 +39,8 @@ if [ "$np_flavor" = rosetta ] || [ ! -x "$WINELOADER" ] || [ ! -x "$WINESERVER" 
   [ -x "$WINESERVER" ] || WINESERVER="$CX_ROOT/CrossOver-Hosted Application/wineserver-x86"
 fi
 export WINELOADER WINESERVER
-export WINEDLLPATH="$CX_ROOT/lib/wine/x86_64-windows:$wine_unix"
+# If two WINEDLLPATH directories have the same DLL, Wine uses the one listed first.
+export WINEDLLPATH="$CX_ROOT/lib/wine/x86_64-windows:$wine_unix${WINEDLLPATH:+:$WINEDLLPATH}"
 export PATH="$CX_ROOT/bin:$PATH"
 
 if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
@@ -285,7 +272,7 @@ lay_out_proton_profile() {
 if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
   mkdir -p "$WINEPREFIX"
-  msync_from=launch-options
+  msync_from=environment
   if [ -z "$WINEMSYNC" ] && [ -r "$STEAM_COMPAT_DATA_PATH/notproton-msync" ]; then
     WINEMSYNC=$(tr -d ' \t\n' \
       < "$STEAM_COMPAT_DATA_PATH/notproton-msync" 2>/dev/null || true)
@@ -410,7 +397,8 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   install_lsteamclient_trigger
   install_legacy_steam_dll
   export WINEDLLPATH="$prefix_steam:$WINEDLLPATH"
-  export WINEDLLOVERRIDES="steamclient=n;steamclient64=n;lsteamclient=b"
+  # If the same DLL appears twice in WINEDLLOVERRIDES, the last entry wins.
+  export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}steamclient=n;steamclient64=n;lsteamclient=b"
   native_client="$STEAM_COMPAT_CLIENT_INSTALL_PATH"
   if [ -z "$native_client" ]; then
     native_client="$HOME/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS"
@@ -419,12 +407,13 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   install_legacycompat
   echo "=== bridge staged into $prefix_steam ===" >> "$log" 2>&1 || true
   echo "WINEDLLPATH=$WINEDLLPATH" >> "$log" 2>&1 || true
+  echo "WINEDLLOVERRIDES=$WINEDLLOVERRIDES" >> "$log" 2>&1 || true
   echo "STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_COMPAT_CLIENT_INSTALL_PATH" >> "$log" 2>&1 || true
 fi
 
 export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
 trap - EXIT
-echo "launch_env=$launch_env" >> "$log" 2>&1 || true
+echo "launch_args=$launch_args" >> "$log" 2>&1 || true
 echo "=== launching ($verb): $WINELOADER $* ===" >> "$log" 2>&1 || true
 
 target="$1"

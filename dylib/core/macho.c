@@ -1,5 +1,7 @@
 #include "macho.h"
 #include <mach-o/dyld.h>
+#include <mach-o/nlist.h>
+#include <sys/mman.h>
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
@@ -182,4 +184,71 @@ int np_get_section_containing(const struct mach_header_64 *mh, intptr_t slide,
         cursor += lc->cmdsize;
     }
     return -1;
+}
+
+int np_rebind_import(const struct mach_header_64 *mh, intptr_t slide,
+                     const char *symbol, void *replacement) {
+    if (!mh || !symbol || !replacement) return -1;
+
+    const struct symtab_command   *symtab   = NULL;
+    const struct dysymtab_command *dysymtab = NULL;
+    const struct segment_command_64 *linkedit = NULL;
+    const uint8_t *cursor = (const uint8_t *)(mh + 1);
+
+    for (uint32_t i = 0; i < mh->ncmds; i++) {
+        const struct load_command *lc = (const struct load_command *)cursor;
+        if (lc->cmdsize < sizeof(*lc))
+            return -1;
+        if (lc->cmd == LC_SYMTAB)
+            symtab = (const struct symtab_command *)cursor;
+        else if (lc->cmd == LC_DYSYMTAB)
+            dysymtab = (const struct dysymtab_command *)cursor;
+        else if (lc->cmd == LC_SEGMENT_64
+                 && strcmp(((const struct segment_command_64 *)cursor)->segname, SEG_LINKEDIT) == 0)
+            linkedit = (const struct segment_command_64 *)cursor;
+        cursor += lc->cmdsize;
+    }
+    if (!symtab || !dysymtab || !linkedit || !dysymtab->nindirectsyms)
+        return -1;
+
+    uintptr_t base = (uintptr_t)slide + linkedit->vmaddr - linkedit->fileoff;
+    const struct nlist_64 *syms     = (const struct nlist_64 *)(base + symtab->symoff);
+    const char            *strings  = (const char *)(base + symtab->stroff);
+    const uint32_t        *indirect = (const uint32_t *)(base + dysymtab->indirectsymoff);
+
+    int rebound = 0;
+    cursor = (const uint8_t *)(mh + 1);
+    for (uint32_t i = 0; i < mh->ncmds; i++) {
+        const struct load_command *lc = (const struct load_command *)cursor;
+        cursor += lc->cmdsize;
+        if (lc->cmd != LC_SEGMENT_64)
+            continue;
+
+        const struct segment_command_64 *seg = (const struct segment_command_64 *)lc;
+        const struct section_64 *sect = (const struct section_64 *)(seg + 1);
+        for (uint32_t j = 0; j < seg->nsects; j++, sect++) {
+            uint32_t type = sect->flags & SECTION_TYPE;
+            if (type != S_LAZY_SYMBOL_POINTERS && type != S_NON_LAZY_SYMBOL_POINTERS)
+                continue;
+
+            void **slots = (void **)((uintptr_t)slide + sect->addr);
+            for (uint64_t k = 0; k < sect->size / sizeof(void *); k++) {
+                uint32_t index = indirect[sect->reserved1 + k];
+                if (index & (INDIRECT_SYMBOL_LOCAL | INDIRECT_SYMBOL_ABS) || index >= symtab->nsyms)
+                    continue;
+                if (strcmp(strings + syms[index].n_un.n_strx, symbol) != 0)
+                    continue;
+
+                // __DATA_CONST is read-only once dyld is done with it.
+                uintptr_t page = (uintptr_t)&slots[k] & ~(uintptr_t)(getpagesize() - 1);
+                if (mprotect((void *)page, (size_t)getpagesize(), PROT_READ | PROT_WRITE) != 0)
+                    continue;
+                slots[k] = replacement;
+                if (strcmp(seg->segname, "__DATA_CONST") == 0)
+                    mprotect((void *)page, (size_t)getpagesize(), PROT_READ);
+                rebound++;
+            }
+        }
+    }
+    return rebound;
 }

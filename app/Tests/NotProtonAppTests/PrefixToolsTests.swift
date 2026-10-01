@@ -75,6 +75,7 @@ struct PrefixToolsTests {
 
             let environment = PrefixTools.environment(prefix: samplePrefix(), runner: runner)
             let dllPath = try exported("WINEDLLPATH")
+                .replacingOccurrences(of: "${WINEDLLPATH:+:$WINEDLLPATH}", with: "")
                 .replacingOccurrences(of: "$CX_ROOT", with: runner.path(percentEncoded: false))
                 .replacingOccurrences(of: "$wine_unix", with: layout.unixDir.path(percentEncoded: false))
 

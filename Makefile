@@ -36,6 +36,7 @@ SRCS := \
 	dylib/hooks/hook_webui.c \
 	dylib/hooks/hook_webpatch.c \
 	dylib/hooks/hook_spawn.c \
+	dylib/hooks/hook_launch.c \
 	dylib/feats/compat.c \
 	dylib/feats/webui.c \
 	dylib/feats/compatsvc.c \
@@ -55,16 +56,18 @@ TARGET      := $(OUT_DIR)/notproton.dylib
 OBJS := $(patsubst %.c,$(OUT_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all clean rebuild dobby deploy dylib-install sigcheck app-payload app app-zip \
+.PHONY: all clean rebuild dobby deploy dylib dylib-install sigcheck app-payload app app-zip \
         anchorcheck sigdb-fixtures webpatch-fixtures peicon-fixtures panel-behavior app-tests \
         tests-list overlay-shim overlay-shim-install overlay-shim-tests \
         overlay-shim-bench iconmaker icon \
         appinfo helpers-install ntdll-resolve bridge runcheck compatcheck \
-        compatsvc-check scriptcheck FORCE
+        compatsvc-check scriptcheck envcheck launch-shell FORCE
 
 APP_PAYLOAD := app/Sources/NotProtonApp/Resources/payload
 
 all: $(TARGET) $(APP_PAYLOAD)
+
+dylib: $(TARGET)
 
 # SwiftPM's `.copy("Resources/payload")` in Package.swift needs this directory
 # to exist
@@ -84,6 +87,10 @@ runcheck:
 		$(call SKIP,runcheck,shellcheck); exit 0; fi; \
 	shellcheck dylib/feats/compat_run.sh && sh -n dylib/feats/compat_run.sh && \
 	echo "==> runcheck: the run script lints and parses clean"
+
+envcheck:
+	@if [ ! -f dylib/tests/envcheck.sh ]; then $(call SKIP,envcheck,dylib/tests/envcheck.sh); exit 0; fi; \
+	sh dylib/tests/envcheck.sh dylib/feats/compat_run.sh
 
 # runcheck owns compat_run.sh, whose warnings wait for a change that can move
 # the embedded __text baseline
@@ -212,6 +219,15 @@ webpatch-fixtures:
 	rm -rf $$tmp; \
 	if [ $$fail -ne 0 ]; then exit 1; fi; \
 	echo "==> gate table and $$n webpatch fixtures: anchors intact, drift refused"
+
+LAUNCH_SHELL := $(OUT_DIR)/launch-shell
+
+launch-shell:
+	@if [ ! -f dylib/tests/launch-shell.c ]; then $(call SKIP,launch-shell,dylib/tests/launch-shell.c); exit 0; fi; \
+	mkdir -p $(OUT_DIR) && \
+	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g -O1 \
+	  -Wall -Wextra -Wno-unused-parameter -Idylib -o $(LAUNCH_SHELL) dylib/tests/launch-shell.c && \
+	$(LAUNCH_SHELL)
 
 SPAWN_ENV := $(OUT_DIR)/spawn-env
 

@@ -155,6 +155,10 @@ static void *install_thread(void *unused) {
         return NULL;
     }
 
+    // Everything else aborts on a stale signature database,
+    // but this hooks a name and not an address.
+    np_hooks_launch_install(mh, slide);
+
     uintptr_t text_base = 0;
     size_t text_size = 0;
 
