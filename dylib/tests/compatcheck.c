@@ -149,7 +149,7 @@ static void enabled_cases(void) {
 
 // A manager holding `count` entries, the one at `named_slot` carrying the tool name.
 static uint8_t manager[0x400];
-static uint8_t entries[8 * (COMPAT_TOOL_STRIDE + 64)];
+static uint8_t entries[COMPAT_MANAGER_TOOLS_MAX * (COMPAT_TOOL_STRIDE + 64)];
 
 static void *build_manager(uint32_t count, int named_slot) {
     memset(manager, 0, sizeof manager);
@@ -191,6 +191,101 @@ static void manager_cases(void) {
     check(np_compat_registered_tool(mgr) == entries + 2 * np_compat_tool_stride(),
           "the walk steps by the live stride rather than the baseline");
     g_tool_shift = 0;
+}
+
+static void tool_list_cases(void) {
+    static const char path[] = "out/compatcheck-tools";
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        check(0, "the tool list fixture can be written");
+        return;
+    }
+    fputs("notproton\t27.0.0.40921-fex\tfex\tCrossOver Preview (FEX)\n"
+          "notproton-fex-rosetta\t27.0.0.40921-fex\trosetta\tCrossOver Preview (Rosetta)\n"
+          "notproton-26.3\t26.3.0.39832\trosetta\tCrossOver 26.3\n"
+          "notproton\t26.3.0.39832\trosetta\tDuplicate\n"
+          "proton-other\t1\trosetta\tForeign\n"
+          "notproton-x\t1\tarm\tBad flavor\n"
+          "notproton-q\t1\trosetta\tQuote\"d\n"
+          "notproton-short\t1\trosetta\n"
+          "\n", f);
+    fclose(f);
+
+    int kept = np_compat_load_tool_list(path, "/tools");
+    unlink(path);
+
+    check(kept == 3, "only well-formed, unique, notproton-named lines are kept");
+    check(strcmp(g_tools[0].name, "notproton") == 0
+          && strcmp(g_tools[0].flavor, "fex") == 0, "the first line stays first");
+    check(strcmp(g_tools[2].build, "26.3.0.39832") == 0
+          && strcmp(g_tools[2].dir, "/tools/notproton-26.3") == 0,
+          "each tool carries its build and directory");
+
+    uint8_t *mgr = build_manager(3, -1);
+    *(const char **)(entries + np_compat_tool_stride() + COMPAT_TOOL_NAME_OFF) = "notproton-26.3";
+    check(np_compat_registered_tool(mgr) == entries + np_compat_tool_stride(),
+          "the most preferred tool the manager holds is the default");
+    *(const char **)(entries + COMPAT_TOOL_NAME_OFF) = "notproton";
+    check(np_compat_registered_tool(mgr) == entries,
+          "the first listed tool wins when the manager holds it");
+
+    check(np_compat_load_tool_list("out/compatcheck-missing", "/tools") == 0
+          && !g_tool_list_present, "a missing list keeps no tools and says so");
+}
+
+static int put(const char *dir, const char *name, const char *text) {
+    char path[768];
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fputs(text, f);
+    return fclose(f);
+}
+
+static int exists(const char *path) {
+    return access(path, F_OK) == 0;
+}
+
+static void stale_tool_cases(void) {
+    char root[] = "out/compatcheck-toolsd.XXXXXX";
+    if (!mkdtemp(root)) {
+        check(0, "the tools directory fixture can be made");
+        return;
+    }
+    char current[700], legacy[700], user[700], lookalike[700];
+    snprintf(current, sizeof(current), "%s/notproton-26.3", root);
+    snprintf(legacy, sizeof(legacy), "%s/notproton", root);
+    snprintf(user, sizeof(user), "%s/notproton-mine", root);
+    snprintf(lookalike, sizeof(lookalike), "%s/notproton-copy", root);
+    const char *dirs[] = { current, legacy, user, lookalike };
+    for (size_t i = 0; i < 4; i++) mkdir(dirs[i], 0755);
+
+    put(current, "flavor", "rosetta\n");
+    put(current, "run", "#!/bin/sh\n# notproton CrossOver compatibility tool shim\n");
+    put(legacy, "run", "#!/bin/sh\n# notproton CrossOver compatibility tool shim\nset -e\n");
+    put(legacy, "toolmanifest.vdf", "\"manifest\" {}\n");
+    put(legacy, "compatibilitytool.vdf", "\"compatibilitytools\" {}\n");
+    put(user, "run", "#!/bin/sh\nexec my-wine \"$@\"\n");
+    put(lookalike, "run", "#!/bin/sh\n# notproton CrossOver compatibility tool shim\n");
+    put(lookalike, "notes.txt", "mine\n");
+
+    g_tool_count = 0;
+    remove_unlisted_tools(root);
+
+    check(!exists(current), "an unlisted tool with a flavor file is removed");
+    check(!exists(legacy), "the single-tool dylib's directory is removed");
+    check(exists(user), "a notproton directory the user wrote stays");
+    char notes[768];
+    snprintf(notes, sizeof(notes), "%s/notes.txt", lookalike);
+    check(exists(notes), "files this project did not write stay with their directory");
+
+    remove(notes);
+    char path[768];
+    snprintf(path, sizeof(path), "%s/run", user);
+    remove(path);
+    rmdir(user);
+    rmdir(lookalike);
+    rmdir(root);
 }
 
 static uint32_t stub_platforms_value;
@@ -272,6 +367,8 @@ int main(void) {
     oslist_cases();
     enabled_cases();
     manager_cases();
+    tool_list_cases();
+    stale_tool_cases();
     installed_fn_cases();
 
     if (failures) {

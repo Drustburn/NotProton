@@ -19,6 +19,7 @@ enum WineTool: String, CaseIterable, Sendable {
     }
 }
 
+// What compat_run.sh writes to notproton-build when a tool first runs a prefix.
 struct PrefixBuildRecord: Sendable, Equatable {
     let build: String
     let display: String?

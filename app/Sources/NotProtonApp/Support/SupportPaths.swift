@@ -39,6 +39,7 @@ enum SupportPaths {
 
     static var deployedVersion: URL { support.appending(path: "dylib.version") }
 
+    // Read by the dylib at Steam launch, in np_compat_load_tool_list.
     static var toolList: URL { support.appending(path: "tools") }
 
     static func runnerRoot(forBuild build: String, runners: URL = SupportPaths.runners) -> URL {

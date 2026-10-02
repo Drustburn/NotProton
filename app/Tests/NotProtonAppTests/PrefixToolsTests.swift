@@ -272,15 +272,21 @@ struct PrefixToolsTests {
     @Test("Only the pass that launches the game shows the alert")
     func alertSkipsTheEvaluatorPass() throws {
         let source = try Self.compatSource()
-        let gate = try #require(source.range(of: #"if [ "$verb" != run ]; then"#))
+        let helper = try #require(source.range(of: "show_alert() {\n"))
+        let gate = try #require(source.range(of: #"  [ "$verb" != run ] || return 0"#))
         let alert = try #require(source.range(of: "display alert"))
-        let closing = try #require(
-            source.range(of: "  fi\n", range: alert.upperBound..<source.endIndex))
-        let refusal = try #require(source.range(of: "  exit 1\n"))
 
+        #expect(helper.upperBound == gate.lowerBound)
         #expect(gate.upperBound < alert.lowerBound)
-        #expect(alert.upperBound < closing.lowerBound)
-        #expect(closing.upperBound <= refusal.lowerBound)
+        #expect(source.ranges(of: "osascript").count == 1, "an alert bypasses show_alert")
+
+        let calls = source.ranges(of: "  show_alert \"")
+        #expect(!calls.isEmpty)
+        for call in calls {
+            let rest = source[call.upperBound...]
+            let line = try #require(rest.firstIndex(of: "\n"))
+            #expect(rest[line...].hasPrefix("\n  exit 1\n") || rest[line...].hasPrefix("\n    exit 1\n"))
+        }
     }
 
     @Test("The Rosetta flavor takes the x86_64 tree on a runner that has both")

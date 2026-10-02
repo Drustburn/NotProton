@@ -8,6 +8,23 @@ shift || true
 # hook_launch.c passes the launch options through a shell before this script runs, matching
 # Linux Steam. A NAME=value option placed ahead of %command% is an environment variable,
 # and anything after %command% is a launch argument passed to the game.
+# Options saved before the panel wrote %command% arrive after the game instead of ahead of it.
+launch_env=""
+argc=$#
+argi=0
+while [ "$argi" -lt "$argc" ]; do
+  arg="$1"
+  shift
+  case "$arg" in
+    CX_GRAPHICS*=*|D3DM_*=*|DXMT_*=*|DXVK_*=*|MTL_*=*|NOTPROTON_*=*|ROSETTA_*=*|WINE*=*)
+      # shellcheck disable=SC2163 # arg is a NAME=VALUE pair, which export takes as an assignment
+      export "$arg"
+      launch_env="$launch_env $arg"
+      ;;
+    *) set -- "$@" "$arg" ;;
+  esac
+  argi=$((argi + 1))
+done
 launch_args="$*"
 
 case "$verb" in
@@ -17,17 +34,26 @@ case "$verb" in
     ;;
 esac
 
-CX_ROOT="$HOME/Library/Application Support/notproton/runners/current"
-export CX_ROOT
+np_support="$HOME/Library/Application Support/notproton"
 # cxcompatdb resolves its database through CX_HOME and logs an error for
 # every module loaded without it :(
 export CX_HOME="$HOME/Library/Application Support/CrossOver"
 np_flavor=""
+np_build=""
 CDPATH=''
 np_tool_dir=$(cd -- "$(dirname -- "$0")" 2>/dev/null && pwd) || np_tool_dir=""
 if [ -n "$np_tool_dir" ] && [ -r "$np_tool_dir/flavor" ]; then
   read -r np_flavor < "$np_tool_dir/flavor" || np_flavor=""
 fi
+if [ -n "$np_tool_dir" ] && [ -r "$np_tool_dir/build" ]; then
+  read -r np_build < "$np_tool_dir/build" || np_build=""
+fi
+case "$np_build" in *[!A-Za-z0-9.-]*) np_build="" ;; esac
+np_display=$(sed -n 's/.*"display_name"[[:space:]]*"\(.*\)".*/\1/p' \
+  "$np_tool_dir/compatibilitytool.vdf" 2>/dev/null | head -1) || np_display=""
+[ -n "$np_display" ] || np_display="CrossOver build ${np_build:-unknown}"
+CX_ROOT="$np_support/runners/crossover-$np_build/CrossOver"
+export CX_ROOT
 
 wine_unix="$CX_ROOT/lib/wine/aarch64-unix"
 WINELOADER="$wine_unix/wine.app/Contents/MacOS/wine"
@@ -107,6 +133,20 @@ tool_name() {
   esac
 }
 
+# Steam passes "run" for helpers such as install scripts, which get no dialog.
+show_alert() {
+  [ "$verb" != run ] || return 0
+  osascript >/dev/null 2>&1 <<APPLESCRIPT || true
+display alert "$1" message "$2" as critical
+APPLESCRIPT
+}
+
+# A quote or backslash in the text would end the AppleScript string early.
+alert_safe() {
+  # shellcheck disable=SC1003 # the pair deletes a literal backslash, not a quote
+  printf '%s' "$1" | tr -d '"\\'
+}
+
 refuse_foreign_prefix() {
   case "${wine_unix##*/}" in
     aarch64-unix) want=aa64 ;;
@@ -115,13 +155,53 @@ refuse_foreign_prefix() {
   have=$(prefix_machine) || return 0
   [ "$have" = "$want" ] && return 0
   echo "=== prefix ntdll is $have and this compatibility tool wants $want, rebuild the prefix in NotProton ===" >> "$log" 2>&1 || true
-
-  if [ "$verb" != run ]; then
-    osascript >/dev/null 2>&1 <<APPLESCRIPT || true
-display alert "This game needs its prefix rebuilt" message "This game originally ran under $(tool_name "$have"), but $(tool_name "$want") is present now. The prefix needs to be rebuilt in NotProton in order to run the game. You will not lose game saves by rebuilding the prefix." as critical
-APPLESCRIPT
-  fi
+  show_alert "This game needs its prefix rebuilt" "This game originally ran under $(tool_name "$have"), but $(tool_name "$want") is present now. The prefix needs to be rebuilt in NotProton in order to run the game. You will not lose game saves by rebuilding the prefix."
   exit 1
+}
+
+last_wine_build() {
+  updated_file="$STEAM_COMPAT_DATA_PATH/pfx/.update-timestamp"
+  [ -r "$updated_file" ] || return 0
+  read -r updated _ < "$updated_file" || true
+  case "$updated" in '' | *[!0-9]*) return 0 ;; esac
+  [ "$updated" = "$(stat -f %m "$CX_ROOT/share/wine/wine.inf" 2>/dev/null)" ] && return 0
+  had_build=other
+  had_display="another version of CrossOver"
+  for inf in "$np_support"/runners/crossover-*/CrossOver/share/wine/wine.inf; do
+    [ "$(stat -f %m "$inf" 2>/dev/null)" = "$updated" ] || continue
+    had_build=${inf#"$np_support/runners/crossover-"}
+    had_build=${had_build%%/*}
+    had_display=$(awk -F '\t' -v b="$had_build" '$2 == b { print $4; exit }' \
+      "$np_support/tools" 2>/dev/null) || had_display=""
+    break
+  done
+}
+
+refuse_other_build() {
+  record="$STEAM_COMPAT_DATA_PATH/notproton-build"
+  had_build=""
+  had_display=""
+  if [ -r "$record" ]; then
+    {
+      read -r had_build || true
+      read -r had_display || true
+    } < "$record"
+  else
+    last_wine_build
+  fi
+  if [ -n "$had_build" ] && [ "$had_build" != "$np_build" ]; then
+    echo "=== prefix was last run by build $had_build and this compatibility tool runs $np_build, rebuild the prefix in NotProton ===" >> "$log" 2>&1 || true
+    had_display=$(alert_safe "${had_display:-CrossOver build $had_build}")
+    show_alert "This game needs its prefix rebuilt" "This game's prefix was last run by $had_display, and this compatibility tool runs $(alert_safe "$np_display"). Rebuild the prefix in NotProton to run it here, or pick $had_display again in the game's Compatibility settings. You will not lose game saves by rebuilding the prefix."
+    exit 1
+  fi
+}
+
+claim_prefix() {
+  [ -r "$STEAM_COMPAT_DATA_PATH/notproton-build" ] \
+    || echo "=== prefix claimed by build $np_build ===" >> "$log" 2>&1 || true
+  printf '%s\n%s\n' "$np_build" "$np_display" > "$STEAM_COMPAT_DATA_PATH/notproton-build" 2>/dev/null \
+    || echo "=== could not record build $np_build in the prefix ===" >> "$log" 2>&1 || true
 }
 # Steam cloud related
 merge_user_dir() {
@@ -269,6 +349,14 @@ lay_out_proton_profile() {
   fi
 }
 
+stage_step="runner check"
+if [ -z "$np_build" ] || [ ! -d "$CX_ROOT/lib/wine" ]; then
+  echo "=== build ${np_build:-(none recorded)} behind this compatibility tool is not set up, set it up in NotProton ===" >> "$log" 2>&1 || true
+  show_alert "CrossOver is not set up" "The CrossOver build behind $(alert_safe "$np_display") is not set up. Set it up in NotProton, or pick another compatibility tool for this game."
+  exit 1
+fi
+echo "runner: build $np_build ($np_display) at $CX_ROOT" >> "$log" 2>&1 || true
+
 if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
   mkdir -p "$WINEPREFIX"
@@ -282,8 +370,11 @@ if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   export WINEMSYNC="${WINEMSYNC:-0}"
   printf '%s' "$WINEMSYNC" \
     > "$STEAM_COMPAT_DATA_PATH/notproton-msync" 2>/dev/null || true
+  stage_step="prefix build check"
+  refuse_other_build
   stage_step="prefix arch check"
   refuse_foreign_prefix
+  claim_prefix
   echo "sync: WINEMSYNC=$WINEMSYNC from $msync_from" >> "$log" 2>&1 || true
   "$WINESERVER" -k >> "$log" 2>&1 || true
   stage_step="profile layout"
@@ -304,15 +395,15 @@ if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   "$WINELOADER" reg add 'HKLM\Software\Classes\steam\shell\open\command' /ve /t REG_SZ /d '"C:\Program Files (x86)\Steam\steam.exe" "%1"' /f >> "$log" 2>&1 || true
 fi
 
-bridge_src="$HOME/Library/Application Support/notproton/bridge"
+bridge_src="$np_support/bridge"
 prefix_steam="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 verify_runner() {
-  if [ ! -d "$bridge_src/wine" ]; then
-    echo "=== no patched ntdll in the bridge, run NotProton ===" >> "$log" 2>&1 || true
+  if [ ! -d "$bridge_src/wine/$np_build" ]; then
+    echo "=== no patched ntdll for build $np_build in the bridge, set it up in NotProton ===" >> "$log" 2>&1 || true
     return
   fi
   for arch in x86_64-windows i386-windows aarch64-windows; do
-    staged="$bridge_src/wine/$arch/ntdll.dll"
+    staged="$bridge_src/wine/$np_build/$arch/ntdll.dll"
     live="$CX_ROOT/lib/wine/$arch/ntdll.dll"
     [ -f "$staged" ] || continue
     if [ ! -f "$live" ]; then
@@ -414,6 +505,7 @@ fi
 export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
 trap - EXIT
 echo "launch_args=$launch_args" >> "$log" 2>&1 || true
+[ -z "$launch_env" ] || echo "launch_env=$launch_env" >> "$log" 2>&1 || true
 echo "=== launching ($verb): $WINELOADER $* ===" >> "$log" 2>&1 || true
 
 target="$1"

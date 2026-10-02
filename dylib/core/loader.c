@@ -198,9 +198,6 @@ static void *install_thread(void *unused) {
         return NULL;
     }
 
-    // Registers compatibility tool.
-    np_compat_ensure_tool_manifest();
-
     int total = 0;
     int installed = np_hooks_install_all(mh, slide, &resolved, &total);
 
@@ -260,6 +257,9 @@ static void np_init(void) {
 
     np_log_platform_overrides();
     np_compat_export_tools_path();
+    // Steam scans compatibilitytools.d at startup, so the tool directories have to exist
+    // before that occurs.
+    np_compat_ensure_tool_manifest();
     np_hooks_spawn_install();
 
     if (pthread_create(&g_install, NULL, install_thread, NULL) == 0)
