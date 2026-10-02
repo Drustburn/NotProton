@@ -112,8 +112,16 @@ case "$app_id" in ''|0) app_id=$(basename "$STEAM_COMPAT_DATA_PATH" 2>/dev/null)
 case "$app_id" in ''|*[!0-9]*) app_id=0 ;; esac
 echo "app_id=$app_id (STEAM_COMPAT_APP_ID=$STEAM_COMPAT_APP_ID)" >> "$log" 2>&1 || true
 
-[ -n "$SteamAppId" ] || export SteamAppId="$app_id"
-[ -n "$SteamGameId" ] || export SteamGameId="$app_id"
+# Steam does not set SteamAppId or SteamGameId for helpers like the install-script
+# evaluator. If they are set, SteamAPI_Init registers the helper as the running game so the
+# real launch fails with AppError_16. Not applicable to non-Steam shortcuts, which come in
+# as waitforexitandrun.
+case "$verb" in
+  waitforexitandrun)
+    [ -n "$SteamAppId" ] || export SteamAppId="$app_id"
+    [ -n "$SteamGameId" ] || export SteamGameId="$app_id"
+    ;;
+esac
 
 prefix_machine() {
   dll="$WINEPREFIX/drive_c/windows/system32/ntdll.dll"
@@ -515,15 +523,28 @@ echo "launch_args=$launch_args" >> "$log" 2>&1 || true
 echo "=== launching ($verb): $WINELOADER $* ===" >> "$log" 2>&1 || true
 
 target="$1"
-case "$target" in
-  "$STEAM_COMPAT_INSTALL_PATH"/*) foreground=1 ;;
+# A game can arrive as a URL with no install path to match, so the verb has to decide the route.
+case "$verb" in
+  waitforexitandrun) foreground=1 ;;
   *) foreground=0 ;;
 esac
 
+shim_exe="C:\\Program Files (x86)\\Steam\\steam.exe"
+
 if [ "$foreground" = 0 ]; then
-  echo "=== running helper on raw loader: $* ===" >> "$log" 2>&1 || true
-  "$WINELOADER" "$@" >> "$log" 2>&1
-  status=$?
+  status=0  # set -e would exit before the status is read
+  case "$verb" in
+    # runinprefix is the one verb the Linux client keeps on the raw loader.
+    runinprefix)
+      echo "=== running helper on raw loader: $* ===" >> "$log" 2>&1 || true
+      "$WINELOADER" "$@" >> "$log" 2>&1 || status=$?
+      ;;
+    *)
+      # A helper target can be a URL, which steam.exe resolves.
+      echo "=== running helper through the shim: $* ===" >> "$log" 2>&1 || true
+      "$WINELOADER" "$shim_exe" "$@" >> "$log" 2>&1 || status=$?
+      ;;
+  esac
   echo "=== helper exited status=$status ===" >> "$log" 2>&1 || true
   exit $status
 fi
@@ -764,8 +785,6 @@ terminate() {
   [ -n "$open_pid" ] && kill "$open_pid" 2>/dev/null || true
 }
 trap terminate TERM INT HUP
-
-shim_exe="C:\\Program Files (x86)\\Steam\\steam.exe"
 
 game_cwd="$(pwd)"
 if [ -n "$STEAM_DYLD_INSERT_LIBRARIES" ]; then
