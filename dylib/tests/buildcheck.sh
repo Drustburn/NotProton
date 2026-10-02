@@ -38,7 +38,7 @@ launch() {
 	build=$1 updated=$2 record=$3
 	data=$(mktemp -d "$work/compatdata.XXXXXX")
 	mkdir -p "$data/pfx"
-	[ -z "$updated" ] || printf '%s\n' "$updated" > "$data/pfx/.update-timestamp"
+	[ -z "$updated" ] || printf '%s\r\n' "$updated" > "$data/pfx/.update-timestamp"
 	[ -z "$record" ] || printf '%s' "$record" > "$data/notproton-build"
 	(
 		STEAM_COMPAT_DATA_PATH=$data
@@ -68,6 +68,10 @@ is "a prefix no clone updated is refused" "status=1
 last run by another version of CrossOver" "$(launch 26.3.0.39832 1 "")"
 is "updates the user disabled say nothing, so the prefix is claimed" "status=0
 26.3.0.39832" "$(launch 26.3.0.39832 disable "")"
+
+clone 27.0.0.40921 202608211200
+is "a prefix either of two clones updated names neither" "status=1
+last run by another version of CrossOver" "$(launch 26.3.0.39832 "$(mtime 27.0.0.40921)" "")"
 
 echo "== prefixes with a record =="
 is "the record wins over the Wine that updated the prefix" "status=0
