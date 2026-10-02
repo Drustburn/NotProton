@@ -1040,14 +1040,15 @@ struct PrefixToolsTests {
 
         let definition = try #require(source.range(of: "lay_out_proton_profile() {"))
         let call = try #require(source.range(of: "  lay_out_proton_profile\n"))
-        let wineboot = try #require(source.range(of: "wineboot --init"))
+        let settings = try #require(source.range(of: "  import_prefix_settings\n"))
 
         // sh reads a script top to bottom, so a call above the definition is only an
         // unknown command.
         #expect(definition.lowerBound < call.lowerBound)
         // wineboot is what swaps the profile folders for links into the mac home, so
-        // they have to already exist when it runs.
-        #expect(call.lowerBound < wineboot.lowerBound)
+        // they have to already exist when it runs. The settings import is the first
+        // Wine process of a launch, and Wine runs wineboot --init ahead of it.
+        #expect(call.lowerBound < settings.lowerBound)
     }
 
     @Test("The profile link points at steamuser, not out of the prefix")
