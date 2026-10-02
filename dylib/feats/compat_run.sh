@@ -163,17 +163,23 @@ last_wine_build() {
   updated_file="$STEAM_COMPAT_DATA_PATH/pfx/.update-timestamp"
   [ -r "$updated_file" ] || return 0
   read -r updated _ < "$updated_file" || true
+  # Wine ends the line with CRLF.
+  updated=${updated%"$(printf '\r')"}
   case "$updated" in '' | *[!0-9]*) return 0 ;; esac
   [ "$updated" = "$(stat -f %m "$CX_ROOT/share/wine/wine.inf" 2>/dev/null)" ] && return 0
   had_build=other
   had_display="another version of CrossOver"
   for inf in "$np_support"/runners/crossover-*/CrossOver/share/wine/wine.inf; do
     [ "$(stat -f %m "$inf" 2>/dev/null)" = "$updated" ] || continue
+    if [ "$had_build" != other ]; then
+      had_build=other
+      had_display="another version of CrossOver"
+      break
+    fi
     had_build=${inf#"$np_support/runners/crossover-"}
     had_build=${had_build%%/*}
     had_display=$(awk -F '\t' -v b="$had_build" '$2 == b { print $4; exit }' \
       "$np_support/tools" 2>/dev/null) || had_display=""
-    break
   done
 }
 
