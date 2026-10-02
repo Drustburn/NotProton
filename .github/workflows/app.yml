@@ -103,6 +103,7 @@ jobs:
           make -s launch-shell
           make -s envcheck
           make -s buildcheck
+          make -s routecheck
 
       - name: Run the Swift tests
         run: make -s app-tests
