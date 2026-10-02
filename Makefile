@@ -61,7 +61,7 @@ DEPS := $(OBJS:.o=.d)
         tests-list overlay-shim overlay-shim-install overlay-shim-tests \
         overlay-shim-bench iconmaker icon \
         appinfo helpers-install ntdll-resolve bridge runcheck compatcheck \
-        compatsvc-check scriptcheck envcheck buildcheck routecheck launch-shell FORCE
+        compatsvc-check scriptcheck envcheck buildcheck settingscheck routecheck launch-shell FORCE
 
 APP_PAYLOAD := app/Sources/NotProtonApp/Resources/payload
 
@@ -95,6 +95,10 @@ envcheck:
 buildcheck:
 	@if [ ! -f dylib/tests/buildcheck.sh ]; then $(call SKIP,buildcheck,dylib/tests/buildcheck.sh); exit 0; fi; \
 	sh dylib/tests/buildcheck.sh dylib/feats/compat_run.sh
+
+settingscheck:
+	@if [ ! -f dylib/tests/settingscheck.sh ]; then $(call SKIP,settingscheck,dylib/tests/settingscheck.sh); exit 0; fi; \
+	sh dylib/tests/settingscheck.sh dylib/feats/compat_run.sh
 
 routecheck:
 	@if [ ! -f dylib/tests/routecheck.sh ]; then $(call SKIP,routecheck,dylib/tests/routecheck.sh); exit 0; fi; \

@@ -363,6 +363,37 @@ lay_out_proton_profile() {
   fi
 }
 
+import_prefix_settings() {
+  if [ "$NOTPROTON_RETINA" = "1" ]; then
+    retina_line='"RetinaMode"="y"'
+  else
+    retina_line='"RetinaMode"=-'
+  fi
+  settings_file=$(mktemp "$WINEPREFIX/drive_c/notproton-settings.XXXXXX" 2>/dev/null) \
+    || settings_file=""
+  if [ -z "$settings_file" ] || ! printf '%s\r\n' \
+      'Windows Registry Editor Version 5.00' '' \
+      '[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\AeDebug]' '"Auto"="0"' '' \
+      '[HKEY_LOCAL_MACHINE\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\AeDebug]' '"Auto"="0"' '' \
+      '[HKEY_CURRENT_USER\Software\Wine\WineDbg]' '"ShowCrashDialog"=dword:00000000' '' \
+      '[HKEY_CURRENT_USER\Software\Wine\Mac Driver]' "$retina_line" '' \
+      '[HKEY_LOCAL_MACHINE\Software\Classes\steam]' '"URL Protocol"=""' '' \
+      '[HKEY_LOCAL_MACHINE\Software\Classes\steam\shell\open\command]' \
+      '@="\"C:\\Program Files (x86)\\Steam\\steam.exe\" \"%1\""' '' \
+      > "$settings_file" 2>/dev/null; then
+    [ -z "$settings_file" ] || rm -f "$settings_file"
+    echo "=== could not write the prefix settings, launching without them ===" >> "$log" 2>&1 || true
+    # the bridge staging still needs a built prefix
+    "$WINELOADER" wineboot --init >> "$log" 2>&1 || true
+    return 0
+  fi
+  "$WINELOADER" reg import "C:\\${settings_file##*/}" >> "$log" 2>&1 \
+    && import_status=0 || import_status=$?
+  rm -f "$settings_file"
+  [ "$import_status" -eq 0 ] \
+    || echo "=== prefix settings import exited status=$import_status ===" >> "$log" 2>&1 || true
+}
+
 stage_step="runner check"
 if [ -z "$np_build" ] || [ ! -d "$CX_ROOT/lib/wine" ]; then
   echo "=== build ${np_build:-(none recorded)} behind this compatibility tool is not set up, set it up in NotProton ===" >> "$log" 2>&1 || true
@@ -393,20 +424,9 @@ if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   "$WINESERVER" -k >> "$log" 2>&1 || true
   stage_step="profile layout"
   lay_out_proton_profile
-  "$WINELOADER" wineboot --init >> "$log" 2>&1 || true
-  "$WINELOADER" reg add 'HKLM\Software\Microsoft\Windows NT\CurrentVersion\AeDebug' /v Auto /t REG_SZ /d 0 /f >> "$log" 2>&1 || true
-  "$WINELOADER" reg add 'HKLM\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\AeDebug' /v Auto /t REG_SZ /d 0 /f >> "$log" 2>&1 || true
-  "$WINELOADER" reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f >> "$log" 2>&1 || true
-
   echo "video: RetinaMode=${NOTPROTON_RETINA:-0}" >> "$log" 2>&1 || true
-  if [ "$NOTPROTON_RETINA" = "1" ]; then
-    "$WINELOADER" reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d y /f >> "$log" 2>&1 || true
-  else
-    "$WINELOADER" reg delete 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /f >> "$log" 2>&1 || true
-  fi
-
-  "$WINELOADER" reg add 'HKLM\Software\Classes\steam' /v 'URL Protocol' /t REG_SZ /d '' /f >> "$log" 2>&1 || true
-  "$WINELOADER" reg add 'HKLM\Software\Classes\steam\shell\open\command' /ve /t REG_SZ /d '"C:\Program Files (x86)\Steam\steam.exe" "%1"' /f >> "$log" 2>&1 || true
+  stage_step="prefix settings"
+  import_prefix_settings
 fi
 
 bridge_src="$np_support/bridge"
@@ -482,15 +502,23 @@ bridge_files="$bridge_files lsteamclient.dll steam.exe"
 if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   stage_step="bridge staging"
   mkdir -p "$prefix_steam"
-  for f in $bridge_files; do
-    src="$bridge_src/$f"
-    if [ ! -f "$src" ]; then
-      echo "=== bridge missing $f ===" >> "$log" 2>&1 || true
-      continue
-    fi
-    cp -f "$src" "$prefix_steam/$f" || \
-      echo "=== failed to stage $f ===" >> "$log" 2>&1
-  done
+  # shellcheck disable=SC2086 # the list is ours and has no spaces
+  src_stamp=$(cd "$bridge_src" && stat -f '%z %m' $bridge_files 2>/dev/null) || true
+  # shellcheck disable=SC2086
+  dst_stamp=$(cd "$prefix_steam" && stat -f '%z %m' $bridge_files 2>/dev/null) || true
+  if [ -n "$src_stamp" ] && [ "$src_stamp" = "$dst_stamp" ]; then
+    echo "=== bridge already staged ===" >> "$log" 2>&1 || true
+  else
+    for f in $bridge_files; do
+      src="$bridge_src/$f"
+      if [ ! -f "$src" ]; then
+        echo "=== bridge missing $f ===" >> "$log" 2>&1 || true
+        continue
+      fi
+      cp -fp "$src" "$prefix_steam/$f" || \
+        echo "=== failed to stage $f ===" >> "$log" 2>&1
+    done
+  fi
   for f in "$prefix_steam"/*.dll "$prefix_steam"/*.so "$prefix_steam"/*.exe; do
     [ -f "$f" ] || continue
     case " $bridge_files " in
@@ -595,9 +623,11 @@ resolve_icon() {
   if [ -n "$meta_clienticon" ]; then
     ico="$loader_root/clienticon-$meta_clienticon.ico"
     absent="$loader_root/clienticon-$meta_clienticon.absent"
+    failed="$loader_root/clienticon-$meta_clienticon.failed"
     find "$loader_root" -maxdepth 1 -name 'clienticon-*'   ! -name "clienticon-$meta_clienticon.*" -delete 2>/dev/null || true
     find "$absent" -mtime +14 -delete 2>/dev/null || true
-    if [ ! -s "$ico" ] && [ ! -f "$absent" ]; then
+    find "$failed" -mmin +60 -delete 2>/dev/null || true
+    if [ ! -s "$ico" ] && [ ! -f "$absent" ] && [ ! -f "$failed" ]; then
       url="https://shared.fastly.steamstatic.com/community_assets/images/apps/$app_id/$meta_clienticon.ico"
       code=$(curl -fsL --connect-timeout 5 --max-time 20 -w '%{http_code}' -o "$ico.new" "$url" 2>>"$log")
       magic=$(od -An -tx1 -N4 "$ico.new" 2>/dev/null | tr -d ' \n')
@@ -610,7 +640,8 @@ resolve_icon() {
           : > "$absent"
           echo "no client icon published for $meta_clienticon" >> "$log" 2>&1 || true
         else
-          echo "client icon fetch for $meta_clienticon failed (http ${code:-none}), will retry" >> "$log" 2>&1 || true
+          : > "$failed"
+          echo "client icon fetch for $meta_clienticon failed (http ${code:-none}), will retry in an hour" >> "$log" 2>&1 || true
         fi
       fi
     fi
