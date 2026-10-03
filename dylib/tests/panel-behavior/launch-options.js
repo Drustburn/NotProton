@@ -55,6 +55,9 @@ for (const form of Object.keys(FORMS)) {
     t.ok(repeated === 'MTL_HUD_ENABLED=1 %command%',
          'repeated edits do not accumulate whitespace');
   }
+  written.length = 0;
+  hud('WINEDEBUG=x MTL_HUD_ENABLED=1').props.onChange(false);
+  t.ok(last() === 'WINEDEBUG=x', 'removing the last token leaves no trailing separator');
 
   const duplicates = 'MTL_HUD_ENABLED=1\tMTL_HUD_ENABLED="0" %command%';
   t.ok(!hud(duplicates).props.checked, 'the last assignment determines the toggle');

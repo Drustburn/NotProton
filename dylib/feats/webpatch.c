@@ -146,7 +146,7 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     "s=ps=>{if(!a)return;let rest=\"\",end=0;" \
     "ed.forEach(x=>{if(ps.some(p=>o.startsWith(p[0]+\"=\",x.start))){" \
     "rest+=o.slice(end,x.start);end=x.end;" \
-    "while(end<o.length&&/\\s/.test(o[end]))end++}});rest+=o.slice(end);" \
+    "while(end<o.length&&/\\s/.test(o[end]))end++}});rest=end<o.length?rest+o.slice(end):rest.trimEnd();" \
     "const added=ps.filter(p=>p[1]).map(p=>p[0]+\"=\"+p[1]).join(\" \");" \
     "if(added&&cut<0)rest=\"%command%\"+(rest?\" \"+rest:\"\");" \
     "const r=added?added+(rest?\" \"+rest:\"\"):rest;" \
