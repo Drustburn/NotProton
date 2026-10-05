@@ -455,12 +455,13 @@ verify_runner() {
     echo "=== runner is missing $arch/$name, set up the runner in NotProton ===" >> "$log" 2>&1 || true
   done
 }
+# Clone rather than copy where the filesystem allows it.
 install_lsteamclient_trigger() {
   src="$bridge_src/i386-windows/lsteamclient.dll"
   dst="$WINEPREFIX/drive_c/windows/syswow64/lsteamclient.dll"
   [ -f "$src" ] && [ -d "$WINEPREFIX/drive_c/windows/syswow64" ] || return 0
   cmp -s "$src" "$dst" && return 0
-  if cp -f "$src" "$dst"; then
+  if cp -c -f "$src" "$dst" 2>/dev/null || cp -f "$src" "$dst"; then
     echo "=== installed syswow64 lsteamclient trigger ===" >> "$log" 2>&1 || true
   else
     echo "=== could not install the syswow64 lsteamclient trigger ===" >> "$log" 2>&1 || true
@@ -473,7 +474,7 @@ install_legacy_steam_dll() {
   dst="$WINEPREFIX/drive_c/windows/syswow64/Steam.dll"
   [ -f "$src" ] && [ -d "$WINEPREFIX/drive_c/windows/syswow64" ] || return 0
   cmp -s "$src" "$dst" && return 0
-  if cp -f "$src" "$dst"; then
+  if cp -c -f "$src" "$dst" 2>/dev/null || cp -f "$src" "$dst"; then
     echo "=== installed legacy Steam.dll ===" >> "$log" 2>&1 || true
   else
     echo "=== could not install the legacy Steam.dll ===" >> "$log" 2>&1 || true
@@ -492,7 +493,7 @@ install_legacycompat() {
     [ -f "$f" ] || continue
     b=$(basename "$f")
     cmp -s "$f" "$dst/$b" && continue
-    cp -f "$f" "$dst/$b" && \
+    { cp -c -f "$f" "$dst/$b" 2>/dev/null || cp -f "$f" "$dst/$b"; } && \
       echo "=== installed legacycompat/$b ===" >> "$log" 2>&1
   done
 }
@@ -515,7 +516,8 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
         echo "=== bridge missing $f ===" >> "$log" 2>&1 || true
         continue
       fi
-      cp -fp "$src" "$prefix_steam/$f" || \
+      { cp -c -fp "$src" "$prefix_steam/$f" 2>/dev/null \
+          || cp -fp "$src" "$prefix_steam/$f"; } || \
         echo "=== failed to stage $f ===" >> "$log" 2>&1
     done
   fi
