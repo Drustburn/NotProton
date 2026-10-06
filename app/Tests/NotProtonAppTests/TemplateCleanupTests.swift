@@ -261,6 +261,17 @@ struct TemplateCleanupTests {
         #expect(!FileManager.default.fileExists(atPath: library.root.path))
     }
 
+    @MainActor
+    @Test("A blocked installation can measure storage without cleaning another build's templates")
+    func skipsMaintenanceForNewerBuild() async throws {
+        let layout = try Layout()
+        defer { try? FileManager.default.removeItem(at: layout.root) }
+        let status = SystemStatus()
+        await status.refreshRunnerStorage(runners: layout.runners, libraries: [layout.library], cleanTemplates: false)
+        #expect(FileManager.default.fileExists(atPath: layout.template.path))
+        #expect(!FileManager.default.fileExists(atPath: layout.lock.path))
+    }
+
     @Test("A read-only library without a cache needs no cleanup lock")
     func skipsMissingCacheOnReadOnlyLibrary() throws {
         let layout = try Layout()

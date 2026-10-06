@@ -29,6 +29,7 @@ enum AppLog {
             "state steam=\(describe(snapshot.steam))",
             "state steamRunning=\(snapshot.steamRunning) updatesBlocked=\(snapshot.updateBlocked)",
             "state runner=\(describe(snapshot.runner))",
+            "state installContent=\(snapshot.installContent)",
         ]
 
         if snapshot.crossOver.isEmpty {

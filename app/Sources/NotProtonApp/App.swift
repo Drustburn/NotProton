@@ -64,13 +64,13 @@ struct NotProtonApp: App {
         CommandMenu("Setup") {
             Button("Install") { Task { await status.requestInstall() } }
                 .keyboardShortcut("i", modifiers: .command)
-                .disabled(!status.isIdle)
+                .disabled(!status.canInstall)
 
             Button("Set Up Compatibility Tool") { Task { await status.requestCompatibilityTool() } }
-                .disabled(!status.isIdle || status.setupSource == nil)
+                .disabled(!status.canInstall || status.setupSource == nil)
 
             Button("Fetch Valve Binaries") { Task { await status.fetchValveBinaries() } }
-                .disabled(!status.isIdle)
+                .disabled(!status.canInstall)
 
             Divider()
 

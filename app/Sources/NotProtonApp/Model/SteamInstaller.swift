@@ -62,6 +62,15 @@ enum SteamInstaller {
         appinfo: URL = SupportPaths.appinfo,
         deployedVersion: URL = SupportPaths.deployedVersion,
         backups: URL = SupportPaths.backups,
+        compatTools: URL = SupportPaths.Steam.compatTools,
+        recordBuild: Bool = true,
+        holdingInstallationLock: Bool = false,
+        runnerIsRunning: @Sendable (URL) -> Bool = { RunnerInstaller.isRunning(from: $0) },
+        verifyRunner: (RunnerBuild, URL) throws -> Void = RunnerInstaller.verifyClone,
+        patchRunner: (RunnerBuild, URL, URL) throws -> Void = { build, root, bridge in
+            _ = try NtdllPatcher.stage(build: build, runnerRoot: root, bridge: bridge)
+            _ = try RunnerPatcher.install(build: build, root: root, bridge: bridge)
+        },
         stopClient: ClientStopper = stopTheClient,
         register: BundleRegistrar = { SteamBundle.register($0) },
         report: @escaping @Sendable (InstallPhase) -> Void = { _ in }
@@ -70,35 +79,79 @@ enum SteamInstaller {
         let payload = try suppliedPayload ?? InstallPayload.locate()
         let bridgeLocated = try suppliedBridge ?? BridgePayload.locate()
 
-        report(.stagingBridge)
-        let bridgeResult = try BridgePayload.stage(located: bridgeLocated, bridge: bridge)
-
         report(.preflight)
         let plist = app.appending(path: "Contents/Info.plist")
         let dylib = app.appending(path: "Contents/MacOS/\(SupportPaths.dylibName)")
         try assertBundleIsPresent(app)
         try assertInsertIsDeployedOrAbsent(at: plist, dylib: dylib)
+        let installationLock = holdingInstallationLock ? -1 : try DeploymentContent.acquireInstallationLock(for: app)
+        defer { if installationLock >= 0 { close(installationLock) } }
+        guard let dylibHashes = try MachOBuild.hashesIgnoringSignature(of: payload.dylib) else {
+            throw StepFailure(step: step, detail: "The bundled NotProton dylib is invalid.")
+        }
+        let build = DeploymentContent.Build(version: version, builtAt: payload.builtAt,
+                                            dylibHashes: dylibHashes)
+        let record = DeploymentContent.record(beside: deployedVersion)
+        let previousBuild = try DeploymentContent.readBuild(at: record)
+        let support = deployedVersion.deletingLastPathComponent()
+        let runners = support.appending(path: "runners")
+        let tools = CompatToolList.installed(runners: runners, file: support.appending(path: "tools"))
+        let files = DeploymentContent.files(
+            payload: payload, bridgePayload: bridgeLocated, app: app, bridge: bridge,
+            signatures: signatures, overlayShim: overlayShim, iconmaker: iconmaker, appinfo: appinfo,
+            compatTools: compatTools, tools: tools, runners: runners)
+        let content = try DeploymentContent.inspect(files: files, bundled: build, installed: previousBuild,
+                                                   legacyVersion: SteamBundle.deployedVersion(at: deployedVersion))
+        guard content != .newerInstalled else {
+            throw StepFailure(step: step, detail: "A newer NotProton build is installed. Use that build to update or repair the installed files.")
+        }
+        func refuseRunningRunners() throws {
+            for id in RunnerStore.clonedBuilds(in: runners) where runnerIsRunning(SupportPaths.runnerRoot(forBuild: id, runners: runners)) {
+                throw StepFailure(step: step, detail: "A game or Wine tool is running on build \(id). Quit it before updating NotProton.")
+            }
+        }
+        try refuseRunningRunners()
+        let builds = RunnerStore.installedBuilds(in: runners)
+        for build in builds {
+            try verifyRunner(build, SupportPaths.clonedRoot(forBuild: build.id, runners: runners))
+        }
         let patching = try needsPatching(plist: plist, dylib: dylib, shipping: payload.dylib, app: app)
+        let replacingFiles = try files.contains {
+            try !$0.matches() && FileManager.default.fileExists(atPath: $0.destination.path(percentEncoded: false))
+        }
+        let pinned = try DeploymentContent.pinnedFiles(bridge: bridge, runners: runners)
+        let existingAccount = previousBuild != nil || SteamBundle.deployedVersion(at: deployedVersion) != nil
+            || pinned.contains { FileManager.default.fileExists(atPath: $0.destination.path(percentEncoded: false)) }
+        let replacingPinned = existingAccount && pinned.contains { Digest.sha256IfPresent($0.destination) != $0.hash }
 
         var stopped = false
-        if patching {
+        if patching || replacingFiles || replacingPinned {
             stopped = try stopClient(app) { report(.stoppingClient) }
+        }
+        try refuseRunningRunners()
+        _ = try CompatToolList.sync(runners: runners, bridge: bridge,
+                                   file: support.appending(path: "tools"), compatTools: compatTools)
 
+        report(.stagingBridge)
+        let bridgeResult = try BridgePayload.stage(located: bridgeLocated, bridge: bridge)
+        for build in builds {
+            try patchRunner(build, SupportPaths.clonedRoot(forBuild: build.id, runners: runners), bridge)
+        }
+
+        if patching {
             report(.copyingDylib)
             try install(payload.dylib, at: dylib)
         }
-        try write(version, to: deployedVersion)
 
         report(.installingSignatures)
-        try FileManager.default.createDirectory(at: signatures, withIntermediateDirectories: true)
-        for database in payload.signatures {
-            try install(database, at: signatures.appending(path: database.lastPathComponent))
-        }
-
         report(.installingOverlayShim)
-        try install(payload.overlayShim, at: overlayShim)
-        try install(payload.iconmaker, at: iconmaker)
-        try install(payload.appinfo, at: appinfo)
+        for file in files where file.destination != dylib {
+            if try file.matches() { continue }
+            try install(file.source, at: file.destination)
+            if file.executable {
+                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.destination.path(percentEncoded: false))
+            }
+        }
 
         var backedUp = false
         if patching {
@@ -130,6 +183,15 @@ enum SteamInstaller {
                 detail: "Steam is set up to inject a different dylib. Please repair Steam "
                     + "before installing NotProton."
             )
+        }
+
+        let remaining = try files.filter { try !$0.matches() }.map(\.name)
+        guard remaining.isEmpty else {
+            throw StepFailure(step: step, detail: "These files did not update: \(remaining.joined(separator: ", ")).")
+        }
+        if recordBuild {
+            try write(version, to: deployedVersion)
+            try atomicReplace(record, with: JSONEncoder().encode(build), step: step)
         }
 
         report(.finished)
@@ -168,9 +230,8 @@ enum SteamInstaller {
 
     static func needsPatching(plist: URL, dylib: URL, shipping: URL, app: URL) throws -> Bool {
         let deployed = SteamBundle.currentInsert(at: plist) == dylib.path(percentEncoded: false)
-        if deployed, let installed = MachOBuild.identity(of: dylib),
-            let current = MachOBuild.identity(of: shipping), installed == current
-        {
+        let file = DeploymentContent.File(source: shipping, destination: dylib, name: "notproton.dylib", allowsResigning: true)
+        if deployed, try file.matches() {
             AppLog.note("install: Steam already carries this dylib, installing for this account only")
             return false
         }
@@ -212,13 +273,8 @@ enum SteamInstaller {
     }
 
     static func install(_ source: URL, at destination: URL) throws {
-        let files = FileManager.default
         try WriteRefused.catching(destination) {
-            try files.createDirectory(
-                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
-            )
-            try? files.removeItem(at: destination)
-            try files.copyItem(at: source, to: destination)
+            try atomicReplace(destination, from: source, step: step)
         }
     }
 

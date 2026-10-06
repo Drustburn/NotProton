@@ -14,6 +14,8 @@ struct InstallPayloadTests {
         if shim { try Data("shim".utf8).write(to: root.appending(path: "overlay-shim.dylib")) }
         if iconmaker { try Data("iconmaker".utf8).write(to: root.appending(path: "iconmaker")) }
         if appinfo { try Data("appinfo".utf8).write(to: root.appending(path: "appinfo")) }
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: root.appending(path: "run"))
+        try Data("100\n".utf8).write(to: root.appending(path: "build-time"))
         for name in signatures {
             try Data("{}".utf8).write(to: signatureDir.appending(path: name))
         }
@@ -97,5 +99,17 @@ struct InstallPayloadTests {
             #expect(failure.detail.contains("appinfo"))
             #expect(failure.detail.contains("signatures/macos.arm64"))
         }
+    }
+
+    @Test("A missing script or invalid build timestamp cannot be installed")
+    func refusesIncompleteBuildMetadata() throws {
+        let root = try scratchDirectory("payload-build")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try stage(root)
+        try Data("not a timestamp".utf8).write(to: root.appending(path: "build-time"))
+        #expect(throws: StepFailure.self) { try InstallPayload.locate(root: root) }
+        try Data("100".utf8).write(to: root.appending(path: "build-time"))
+        try FileManager.default.removeItem(at: root.appending(path: "run"))
+        #expect(throws: StepFailure.self) { try InstallPayload.locate(root: root) }
     }
 }

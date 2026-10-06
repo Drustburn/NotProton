@@ -377,18 +377,72 @@ struct StatusView: View {
         .disabled(!status.isIdle)
     }
 
-    private func installAction(prominent: Bool) -> StatusAction {
+    private func installAction(prominent: Bool, label: String = "Install") -> StatusAction {
         StatusAction(
-            label: "Install",
+            label: label,
             isProminent: prominent,
             help: "Install NotProton into Steam.",
-            isEnabled: status.isIdle
+            isEnabled: status.canInstall
         ) {
             Task { await status.requestInstall() }
         }
     }
 
+    @ViewBuilder
     private func steamRow(_ deployment: SteamDeployment, payload: PayloadState) -> some View {
+        switch deployment {
+        case .notInstalled:
+            if let content = status.snapshot?.installContent, content.blocksInstallation {
+                installedContentRow(content, deployment: deployment, payload: payload)
+            } else {
+                deploymentRow(deployment, payload: payload)
+            }
+        case .installed, .outdated:
+            if let content = status.snapshot?.installContent, content != .unchecked {
+                installedContentRow(content, deployment: deployment, payload: payload)
+            } else {
+                deploymentRow(deployment, payload: payload)
+            }
+        default:
+            deploymentRow(deployment, payload: payload)
+        }
+    }
+
+    @ViewBuilder
+    private func installedContentRow(_ content: DeploymentContent.Status, deployment: SteamDeployment, payload: PayloadState) -> some View {
+        switch content {
+        case .unchecked, .current:
+            let version: String? = switch deployment {
+            case .installed(let version): version
+            case .outdated(let deployed, _): deployed
+            default: nil
+            }
+            deploymentRow(.installed(version: version), payload: payload)
+        case .newerInstalled:
+            StatusRow(title: "NotProton", value: "A newer build is installed.", tone: .neutral,
+                      detail: "Use the newer NotProton app to update or repair the installed files.")
+        case .unavailable(let reason):
+            StatusRow(title: "NotProton", value: "Could not check installed files.", tone: .warning, detail: reason)
+        case .update(let files):
+            StatusRow(title: "NotProton", value: "Update available.", tone: .warning,
+                      detail: "This app includes newer files than those installed for Steam.",
+                      action: installAction(prominent: true, label: "Update"))
+                .help(files.joined(separator: "\n"))
+        case .repair(let files):
+            StatusRow(title: "NotProton", value: "Installed files differ from this build.", tone: .warning,
+                      detail: "Restore the files included with this app.",
+                      action: installAction(prominent: true, label: "Repair"))
+                .help(files.joined(separator: "\n"))
+        case .unrecorded(let files):
+            StatusRow(title: "NotProton", value: "Update available.", tone: .warning,
+                      detail: "This app includes updated files for Steam.",
+                      action: installAction(prominent: true, label: "Update"))
+                .help(files.joined(separator: "\n"))
+        }
+    }
+
+    @ViewBuilder
+    private func deploymentRow(_ deployment: SteamDeployment, payload: PayloadState) -> some View {
         switch deployment {
         case .steamMissing:
             StatusRow(title: "NotProton", value: "Steam not found.", tone: .bad)
@@ -544,14 +598,14 @@ struct StatusView: View {
                 label: "Set Up",
                 isProminent: prominent,
                 help: "Copy \(row.title) and set up its compatibility tool.",
-                isEnabled: status.isIdle
+                isEnabled: status.canInstall
             ) { Task { await status.requestCompatibilityTool(from: install) } }
         case .unpatched where row.canSetUp, .damaged where row.canSetUp:
             return StatusAction(
                 label: "Repair",
                 isProminent: true,
                 help: "Copy \(row.title) again.",
-                isEnabled: status.isIdle
+                isEnabled: status.canInstall
             ) { Task { await status.requestCompatibilityTool(from: install) } }
         case .unsupported:
             return removeCopyAction(row.buildID, label: "Remove\u{2026}")
@@ -567,7 +621,7 @@ struct StatusView: View {
             items.append(StatusAction(
                 label: "Reinstall",
                 help: "Copy \(row.title) again.",
-                isEnabled: status.isIdle && row.canSetUp
+                isEnabled: status.canInstall && row.canSetUp
             ) { Task { await status.requestCompatibilityTool(from: install, replacingExisting: true) } })
         }
         let shown = install?.bundle
@@ -629,7 +683,7 @@ struct StatusView: View {
             label: "Fetch Valve Binaries",
             isProminent: true,
             help: "Download missing Valve binaries.",
-            isEnabled: status.isIdle
+            isEnabled: status.canInstall
         ) { Task { await status.fetchValveBinaries() } }
     }
 

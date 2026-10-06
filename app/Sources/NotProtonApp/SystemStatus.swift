@@ -24,6 +24,7 @@ struct StatusSnapshot: Sendable {
     var installedRunners: [RunnerBuild] = []
     var orphanedRunners: [String] = []
     var damagedRunners: [String] = []
+    var installContent: DeploymentContent.Status = .unchecked
 
     static func capture(bundledVersion: String) -> StatusSnapshot {
         let installs = CrossOverSource.discover()
@@ -45,7 +46,8 @@ struct StatusSnapshot: Sendable {
             payload: PayloadInspector.inspect(builds: installed),
             installedRunners: installed,
             orphanedRunners: RunnerStore.orphanedClones(),
-            damagedRunners: RunnerStore.damagedClones()
+            damagedRunners: RunnerStore.damagedClones(),
+            installContent: DeploymentContent.current(version: bundledVersion)
         )
     }
 }
@@ -69,6 +71,7 @@ final class SystemStatus {
 
     var isBusy: Bool { activity != nil || runInFlight || checkingLicense }
     var isIdle: Bool { !isBusy && !isRefreshing }
+    var canInstall: Bool { isIdle && snapshot?.installContent.blocksInstallation != true }
 
     enum Confirmation: Identifiable, Hashable {
         case replaceSteam
@@ -188,7 +191,7 @@ final class SystemStatus {
     }
 
     func requestInstall() async {
-        guard isIdle else { return }
+        guard canInstall else { return }
         checkingLicense = true
         defer { checkingLicense = false }
         if let question = Self.activationQuestion(
@@ -205,7 +208,7 @@ final class SystemStatus {
     func requestCompatibilityTool(
         from chosen: CrossOverInstall? = nil, replacingExisting: Bool = false
     ) async {
-        guard isIdle else { return }
+        guard canInstall else { return }
         checkingLicense = true
         defer { checkingLicense = false }
         let install = chosen ?? setupSource
@@ -236,6 +239,8 @@ final class SystemStatus {
         guard let build = pendingRemoval else { return }
         pendingRemoval = nil
         await perform(from: RunnerInstaller.removeStep) { _ in
+            let lock = try DeploymentContent.acquireInstallationLock(for: SupportPaths.Steam.app)
+            defer { close(lock) }
             let changed = try await Task.detached(priority: .userInitiated) {
                 try RunnerInstaller.removeClone(forBuild: build)
             }.value
@@ -328,6 +333,9 @@ final class SystemStatus {
         }
 
         await perform(from: RunnerSetup.Phase.cloning.label) { progress in
+            let lock = try DeploymentContent.acquireInstallationLock(for: SupportPaths.Steam.app)
+            defer { close(lock) }
+            try await requireInstallableContent()
             let result = try await Task.detached(priority: .userInitiated) {
                 try RunnerSetup.run(from: install, replacingExisting: replacingExisting) {
                     progress($0.label)
@@ -339,7 +347,11 @@ final class SystemStatus {
     }
 
     func fetchValveBinaries() async {
+        guard canInstall else { return }
         await perform(from: ValveFetcher.Phase.verifying.label) { progress in
+            let lock = try DeploymentContent.acquireInstallationLock(for: SupportPaths.Steam.app)
+            defer { close(lock) }
+            try await requireInstallableContent()
             let result = try await ValveFetcher.run { progress($0.label) }
             return result.wroteNothing ? nil : "Downloaded missing components."
         }
@@ -350,10 +362,33 @@ final class SystemStatus {
     private static let toolNotActivated =
         "The compatibility tool was not set up because CrossOver is not activated."
 
+    private func requireInstallableContent() async throws {
+        let version = AppVersion.bundled
+        let content = await Task.detached(priority: .utility) {
+            DeploymentContent.current(version: version)
+        }.value
+        snapshot?.installContent = content
+        guard !content.blocksInstallation else {
+            throw StepFailure(step: SteamInstaller.step,
+                              detail: "Installation is blocked. Refresh Status and use the NotProton app that installed this build.")
+        }
+        let running = await Task.detached(priority: .utility) {
+            RunnerStore.clonedBuilds().contains {
+                RunnerInstaller.isRunning(from: SupportPaths.runnerRoot(forBuild: $0))
+            }
+        }.value
+        guard !running else {
+            throw StepFailure(step: SteamInstaller.step, detail: "A game or Wine tool is running. Quit it before updating NotProton.")
+        }
+    }
+
     func installIntoSteam() async {
         await perform(from: InstallPhase.checkingPayload.label) { progress in
+            let lock = try DeploymentContent.acquireInstallationLock(for: SupportPaths.Steam.app)
+            defer { close(lock) }
             let result = try await Task.detached(priority: .userInitiated) {
-                try SteamInstaller.run(report: { progress($0.label) })
+                try SteamInstaller.run(recordBuild: false, holdingInstallationLock: true,
+                                       report: { progress($0.label) })
             }.value
 
             var parts = ["NotProton successfully installed."]
@@ -378,10 +413,36 @@ final class SystemStatus {
             }
 
             // Fetch binaries from Valve
-            if state.payload.missing.contains(where: { $0.origin.isFetchable }) {
+            let valve = try ValvePackageManifest.bundled()
+            let needsValve = await Task.detached(priority: .utility) {
+                valve.files.contains { Digest.sha256IfPresent(SupportPaths.bridge.appending(path: $0.bridgePath)) != $0.sha256 }
+            }.value
+            if needsValve {
                 progress("Downloading missing components")
                 _ = try await ValveFetcher.run { progress($0.label) }
             }
+
+            try await Task.detached(priority: .userInitiated) {
+                let payload = try InstallPayload.locate()
+                for tool in CompatToolList.installed() {
+                    let destination = SupportPaths.Steam.compatTools.appending(path: "\(tool.name)/run")
+                    let file = DeploymentContent.File(source: payload.run, destination: destination, name: tool.name, executable: true)
+                    if try !file.matches() {
+                        try SteamInstaller.install(payload.run, at: destination)
+                        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path(percentEncoded: false))
+                    }
+                }
+                let verified = DeploymentContent.current(version: result.version)
+                guard verified == .current else {
+                    throw StepFailure(step: SteamInstaller.step,
+                                      detail: "Installed content could not be verified. Refresh the Status view for the files that still need attention.")
+                }
+                let build = DeploymentContent.Build(version: result.version, builtAt: payload.builtAt,
+                                                     dylibHashes: try MachOBuild.hashesIgnoringSignature(of: payload.dylib))
+                try SteamInstaller.write(result.version, to: SupportPaths.deployedVersion)
+                try atomicReplace(DeploymentContent.record(beside: SupportPaths.deployedVersion),
+                                  with: JSONEncoder().encode(build), step: SteamInstaller.step)
+            }.value
 
             return parts.joined(separator: " ")
         }
@@ -402,6 +463,8 @@ final class SystemStatus {
 
     func repairSteam() async {
         await perform(from: RepairPhase.checking.label) { progress in
+            let lock = try DeploymentContent.acquireInstallationLock(for: SupportPaths.Steam.app)
+            defer { close(lock) }
             let result = try await SteamRepair.run { progress($0.label) }
 
             var parts = ["Steam restored to its original state."]
@@ -412,6 +475,8 @@ final class SystemStatus {
 
     func removeEverything() async {
         await perform(from: UninstallPhase.stoppingClient.label) { progress in
+            let lock = try DeploymentContent.acquireInstallationLock(for: SupportPaths.Steam.app)
+            defer { close(lock) }
             let result = try await Uninstall.run { progress($0.label) }
 
             return result.restoredValveSignature
@@ -427,19 +492,11 @@ final class SystemStatus {
 
         let version = AppVersion.bundled
         let captured = await Task.detached(priority: .userInitiated) {
-            do {
-                if try CompatToolList.sync() { AppLog.note("tool list rewritten") }
-            } catch {
-                AppLog.note("tool list not written: \(error.localizedDescription)")
-            }
-            for failure in NtdllPatcher.stageInstalled() {
-                AppLog.note("ntdll for \(failure.build) not staged: \(failure.error.localizedDescription)")
-            }
-            return StatusSnapshot.capture(bundledVersion: version)
+            StatusSnapshot.capture(bundledVersion: version)
         }.value
         snapshot = captured
         AppLog.note(captured)
-        await refreshRunnerStorage()
+        await refreshRunnerStorage(cleanTemplates: !captured.installContent.blocksInstallation)
     }
 
     private(set) var runnerSizes: [String: Int64] = [:]
@@ -447,11 +504,13 @@ final class SystemStatus {
     private(set) var templateCleanupFailure: String?
 
     func refreshRunnerStorage(
-        runners: URL = SupportPaths.runners, libraries: [SteamLibrary] = PrefixStore.libraries()
+        runners: URL = SupportPaths.runners, libraries: [SteamLibrary] = PrefixStore.libraries(),
+        cleanTemplates: Bool = true
     ) async {
         let known = runnerSizes
         let measured = await Task.detached(priority: .utility) {
-            let failures = RunnerInstaller.removeStalePrefixTemplates(runners: runners, libraries: libraries)
+            let failures = cleanTemplates
+                ? RunnerInstaller.removeStalePrefixTemplates(runners: runners, libraries: libraries) : []
             var sizes: [String: Int64] = [:]
             var templates: [String: [CompatTool.Flavor: Int64]] = [:]
             for build in RunnerStore.clonedBuilds(in: runners) {
