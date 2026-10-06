@@ -38,12 +38,12 @@ export CX_ROOT
 export CX_HOME="$HOME/Library/Application Support/CrossOver"
 wine_unix="$CX_ROOT/lib/wine/aarch64-unix"
 WINELOADER="$wine_unix/wine.app/Contents/MacOS/wine"
-WINESERVER="$CX_ROOT/CrossOver-Hosted Application/wineserver-arm64"
+WINESERVER="$CX_ROOT/bin/wineserver-arm64"
 if [ ! -x "$WINELOADER" ] || [ ! -x "$WINESERVER" ]; then
   wine_unix="$CX_ROOT/lib/wine/x86_64-unix"
   WINELOADER="$wine_unix/wine"
-  WINESERVER="$CX_ROOT/CrossOver-Hosted Application/wineserver"
-  [ -x "$WINESERVER" ] || WINESERVER="$CX_ROOT/CrossOver-Hosted Application/wineserver-x86"
+  WINESERVER="$CX_ROOT/bin/wineserver"
+  [ -x "$WINESERVER" ] || WINESERVER="$CX_ROOT/bin/wineserver-x86"
 fi
 export WINELOADER WINESERVER
 export WINEDLLPATH="$CX_ROOT/lib/wine/x86_64-windows:$wine_unix"

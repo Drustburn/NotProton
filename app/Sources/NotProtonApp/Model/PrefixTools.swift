@@ -56,23 +56,23 @@ enum PrefixTools {
 
     static func layout(runner: URL = SupportPaths.currentRunner) -> WineLayout {
         let fm = FileManager.default
-        let hosted = runner.appending(path: "CrossOver-Hosted Application")
+        let bin = runner.appending(path: "bin")
         func executable(_ url: URL) -> Bool {
             fm.isExecutableFile(atPath: url.path(percentEncoded: false))
         }
 
         let arm = runner.appending(path: "lib/wine/aarch64-unix")
         let armLoader = arm.appending(path: "wine.app/Contents/MacOS/wine")
-        let armServer = hosted.appending(path: "wineserver-arm64")
+        let armServer = bin.appending(path: "wineserver-arm64")
         if executable(armLoader), executable(armServer) {
             return WineLayout(loader: armLoader, server: armServer, unixDir: arm)
         }
 
         let unix = runner.appending(path: "lib/wine/x86_64-unix")
-        let server = hosted.appending(path: "wineserver")
+        let server = bin.appending(path: "wineserver")
         return WineLayout(
             loader: unix.appending(path: "wine"),
-            server: executable(server) ? server : hosted.appending(path: "wineserver-x86"),
+            server: executable(server) ? server : bin.appending(path: "wineserver-x86"),
             unixDir: unix
         )
     }
