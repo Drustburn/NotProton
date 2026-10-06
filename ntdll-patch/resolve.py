@@ -50,6 +50,7 @@ PINNED = {
 }
 EXPORTS = ['LdrGetDllHandle', 'LdrLoadDll', 'NtProtectVirtualMemory',
            'NtOpenFile', 'NtReadFile', 'NtClose']
+SECTION_NAME, SECTION_SIZE, SECTION_FLAGS = b'.npdet', 0x1000, 0x60000020
 PROLOGUES = [rb'\x55\x89\xe5', rb'\x55\x8b\xec']
 NOP64 = bytes.fromhex('1f2003d5')
 
@@ -81,6 +82,9 @@ class PE:
             if roff:
                 self.secs.append((name, vrva, vsize, roff, rsize))
         self.dirs = self.opt + (112 if wide else 96)
+        self.table_end = e + 24 + optsz + nsec * 40
+        self.sect_align, self.file_align = struct.unpack_from('<II', self.d, self.opt + 32)
+        self.size_of_image, self.size_of_headers = struct.unpack_from('<II', self.d, self.opt + 56)
 
     def sec(self, prefix):
         for s in self.secs:
@@ -136,7 +140,15 @@ class PE:
         # at the end that the loader maps but nothing touches. Detour goes there.
         _, vrva, vsize, roff, rsize = self.sec('.text')
         end = vrva + vsize
-        return {'caveRVA': end, 'caveSize': (vrva + rsize) - end, 'fill': self.d[roff + vsize]}
+        return {'caveRVA': end, 'caveSize': (vrva + rsize) - end, 'fill': self.d[roff + vsize],
+                'placement': 'padding'}
+
+    def appended(self):
+        if self.table_end + 40 > self.size_of_headers or any(self.d[self.table_end:self.table_end + 40]):
+            raise SystemExit(f"{self.path}: no free section header slot after the table")
+        raw = (len(self.d) + self.file_align - 1) & ~(self.file_align - 1)
+        return {'caveRVA': self.size_of_image, 'caveSize': SECTION_SIZE, 'fill': 0,
+                'placement': 'section', 'rawOffset': raw}
 
     def string_refs(self, name):
         """RVAs of instructions referencing a .rdata C string, however the arch addresses it."""
@@ -543,6 +555,8 @@ def resolve(path):
     r = (resolve_aarch64(pe) if pe.machine == 0xaa64 else
          resolve_amd64(pe) if pe.machine == 0x8664 else resolve_i386(pe))
     r.update(pe.cave())
+    if r['caveSize'] < PAYLOAD[pe.machine]:
+        r.update(pe.appended())
     r['machine'], r['magic'], r['imageBase'] = pe.machine, pe.magic, pe.imagebase
     ex = pe.exports()
     r['exports'] = {n: pe.imagebase + ex[n] for n in EXPORTS if n in ex}
@@ -593,6 +607,7 @@ def report(path):
     line('caveRVA', r['caveRVA'], 'caveRVA')
     line('caveSize', r['caveSize'], 'caveSize', fmt=str)
     need = PAYLOAD[r['machine']]
+    print(f"  {'placement':13} {r['placement']}")
     print(f"  {'cave fill':13} {r['fill']:#02x}   room {r['caveSize']} bytes, payload {need}"
           f" -> {'fits' if r['caveSize'] >= need else 'TOO SMALL'}")
     def table(items, want):
@@ -658,6 +673,7 @@ def shell_vars(path):
         'NP_CAVE_RVA': f"{r['caveRVA']:#x}", 'NP_CAVE_SIZE': str(r['caveSize']),
         'NP_PAYLOAD_RVA': f"{payload:#x}", 'NP_PAYLOAD_VA': f"{r['imageBase'] + payload:#x}",
         'NP_CAVE_ROOM': str(room), 'NP_FILL': f"{r['fill']:#04x}",
+        'NP_PLACEMENT': r['placement'],
     }
     if PINNED.get(r['sha256'], {}).get('payload'):
         out['NP_PAYLOAD_SHA256'] = PINNED[r['sha256']]['payload']
