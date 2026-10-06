@@ -59,7 +59,7 @@ OBJS := $(patsubst %.c,$(OUT_DIR)/%.o,$(SRCS))
 DEPS := $(OBJS:.o=.d)
 
 .PHONY: all clean rebuild dobby deploy dylib dylib-install sigcheck app-payload app app-zip \
-        anchorcheck sigdb-fixtures webpatch-fixtures peicon-fixtures panel-behavior app-tests \
+        anchorcheck callscheck sigdb-fixtures webpatch-fixtures peicon-fixtures panel-behavior app-tests \
         tests-list overlay-shim overlay-shim-install overlay-shim-tests \
         overlay-shim-bench iconmaker icon \
         appinfo helpers-install ntdll-resolve bridge runcheck compatcheck \
@@ -160,6 +160,20 @@ $(ANCHORCHECK): $(ANCHORCHECK_SRCS) FORCE
 anchorcheck:
 	@if [ ! -f dylib/tests/anchorcheck.c ]; then $(call SKIP,anchorcheck,dylib/tests/anchorcheck.c); exit 0; fi; \
 	$(MAKE) -s $(ANCHORCHECK) && $(ANCHORCHECK)
+
+CALLSCHECK := $(OUT_DIR)/callscheck
+CALLSCHECK_SRCS := dylib/tests/callscheck.c $(filter-out dylib/tests/anchorcheck.c,$(ANCHORCHECK_SRCS))
+
+$(CALLSCHECK): $(CALLSCHECK_SRCS)
+	@mkdir -p $(dir $@)
+	$(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g -O1 \
+	  -Wall -Wextra -Wno-unused-parameter -Idylib -Ivendor \
+	  -fsanitize=address,undefined -fno-sanitize-recover=all \
+	  -o $@ $(CALLSCHECK_SRCS)
+
+callscheck:
+	@if [ ! -f dylib/tests/callscheck.c ]; then $(call SKIP,callscheck,dylib/tests/callscheck.c); exit 0; fi; \
+	$(MAKE) -s $(CALLSCHECK) && $(CALLSCHECK)
 
 SIGDB_FIXTURES := dylib/tests/sigdb-fixtures
 
