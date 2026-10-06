@@ -422,13 +422,81 @@ struct RunnerRemovalTests {
         return runners
     }
 
-    private func remove(_ build: String, runners: URL, running: Bool = false) throws -> Bool {
+    private func remove(
+        _ build: String, runners: URL, libraries: [SteamLibrary] = [], running: Bool = false
+    ) throws -> Bool {
         try RunnerInstaller.removeClone(
             forBuild: build, runners: runners,
             bridge: runners.appending(path: "bridge"), toolList: runners.appending(path: "tools"),
             compatTools: runners.appending(path: "compatibilitytools.d"),
+            libraries: libraries,
             running: { _ in running }
         )
+    }
+
+    @Test("Removing a build deletes its prefix templates in every library and keeps the others")
+    func removesThatBuildsTemplates() throws {
+        let runners = try makeRunners(cloning: [Self.rosetta.id, Self.fex.id])
+        defer { try? FileManager.default.removeItem(at: runners) }
+        let fm = FileManager.default
+        let libraries = ["internal", "external"].map {
+            SteamLibrary(root: runners.appending(path: "libraries/\($0)"))
+        }
+        for library in libraries {
+            for build in [Self.rosetta.id, Self.fex.id] {
+                for template in SupportPaths.prefixTemplates(forBuild: build, in: library) {
+                    try fm.createDirectory(
+                        at: template.appending(path: "pfx/drive_c"), withIntermediateDirectories: true)
+                }
+            }
+        }
+
+        _ = try remove(Self.rosetta.id, runners: runners, libraries: libraries)
+
+        for library in libraries {
+            let left = try fm.contentsOfDirectory(
+                atPath: library.compatdata.appending(path: SupportPaths.prefixTemplateFolder)
+                    .path(percentEncoded: false)
+            ).sorted()
+            #expect(left == SupportPaths.prefixTemplates(forBuild: Self.fex.id, in: library)
+                .map(\.lastPathComponent).sorted())
+        }
+    }
+
+    @Test("Removing a build also clears templates left by builds removed while their drive was away")
+    func removesTemplatesOfBuildsAlreadyGone() throws {
+        let runners = try makeRunners(cloning: [Self.rosetta.id, Self.fex.id])
+        defer { try? FileManager.default.removeItem(at: runners) }
+        let fm = FileManager.default
+        let library = SteamLibrary(root: runners.appending(path: "libraries/external"))
+        let gone = SupportPaths.prefixTemplates(forBuild: "26.3.0.39832", in: library)
+        for template in gone {
+            try fm.createDirectory(at: template.appending(path: "pfx"), withIntermediateDirectories: true)
+        }
+
+        _ = try remove(Self.rosetta.id, runners: runners, libraries: [library])
+
+        for template in gone { #expect(!fm.fileExists(atPath: template.path(percentEncoded: false))) }
+    }
+
+    @Test("A template is named by the build and the unix arch, under notproton-template")
+    func templateNamesMatchTheScript() throws {
+        let library = SteamLibrary(root: URL(filePath: "/L"))
+        let repo = URL(filePath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let script = try String(contentsOf: repo.appending(path: "dylib/feats/compat_run.sh"), encoding: .utf8)
+        let expression = try #require(script.firstMatch(of: #/runner_id="([^"]+)"/#)).1
+        let cache = script.split(separator: "\n").first { $0.contains("template_cache=\"") }
+        #expect(cache?.contains("$(dirname \"$STEAM_COMPAT_DATA_PATH\")/\(SupportPaths.prefixTemplateFolder)\"") == true)
+        let template = script.split(separator: "\n").first { $0.contains("template_dir=\"") }
+        #expect(template?.contains("template_dir=\"$template_cache/$runner_id\"") == true)
+        let names = ["x86_64-unix", "aarch64-unix"].map { arch in
+            expression.replacingOccurrences(of: "$np_build", with: "27.0.0.40921-fex")
+                .replacingOccurrences(of: "${wine_unix##*/}", with: arch)
+        }
+        #expect(SupportPaths.prefixTemplates(forBuild: "27.0.0.40921-fex", in: library).map(\.path)
+            == names.map { library.compatdata.appending(path: SupportPaths.prefixTemplateFolder).appending(path: $0).path })
     }
 
     @Test("A build with a game still running on it is not removed")

@@ -229,9 +229,7 @@ merge_user_dir() {
     src_dir="$src$rest"
     dst_dir="$dst$rest"
     if [ ! -r "$src_dir" ] || [ ! -x "$src_dir" ]; then failed=1; continue; fi
-    if [ -L "$dst_dir" ] && [ ! -e "$dst_dir" ]; then
-      rm -f "$dst_dir" 2>/dev/null || true
-    fi
+    if [ -L "$dst_dir" ]; then failed=1; continue; fi
     probe=$dst_dir
     through=
     while [ -n "$probe" ] && [ "$probe" != "$dst" ]; do
@@ -243,7 +241,10 @@ merge_user_dir() {
       failed=1
       continue
     fi
-    if [ -n "$rest" ] && [ -e "$dst_dir" ]; then continue; fi
+    if [ -e "$dst_dir" ] && [ ! -d "$dst_dir" ]; then
+      failed=1
+      continue
+    fi
     if ! mkdir -p "$dst_dir" 2>/dev/null; then failed=1; continue; fi
     for entry in "$src_dir"/* "$src_dir"/.[!.]* "$src_dir"/..?*; do
       [ -e "$entry" ] || [ -L "$entry" ] || continue
@@ -253,16 +254,21 @@ merge_user_dir() {
         continue
       fi
       landing="$dst_dir/$name"
-      if [ -e "$landing" ]; then continue; fi
-      if [ -L "$landing" ]; then rm -f "$landing" 2>/dev/null || true; fi
+      if [ -e "$landing" ] || [ -L "$landing" ]; then
+        if [ -L "$entry" ] && [ -L "$landing" ] \
+          && [ "$(readlink "$entry")" = "$(readlink "$landing")" ]; then continue; fi
+        if [ -f "$entry" ] && [ ! -L "$entry" ] && [ -f "$landing" ] \
+          && [ ! -L "$landing" ] && cmp -s "$entry" "$landing"; then continue; fi
+        echo "=== conflicting profile file: $landing ===" >> "$log" 2>&1 || true
+        failed=1
+        continue
+      fi
       if [ -L "$entry" ]; then
-        if ! cp -Pp "$entry" "$landing" 2>/dev/null; then
-          rm -f "$landing" 2>/dev/null || true
+        if ! cp -Ppn "$entry" "$landing" 2>/dev/null; then
           failed=1
         fi
       else
-        if ! cp -p "$entry" "$landing" 2>/dev/null; then
-          rm -f "$landing" 2>/dev/null || true
+        if ! cp -pn "$entry" "$landing" 2>/dev/null || ! cmp -s "$entry" "$landing"; then
           failed=1
         fi
         chmod u+w "$landing" 2>/dev/null || true
@@ -275,6 +281,7 @@ merge_user_dir() {
 # Steam Cloud stuff
 migrate_user_paths() {
   profile=$1
+  migration_failed=0
   for pair in \
     "Local Settings/Application Data|AppData/Local|../AppData/Local" \
     "Application Data|AppData/Roaming|./AppData/Roaming" \
@@ -291,6 +298,7 @@ migrate_user_paths() {
     if [ -L "$new" ]; then
       echo "=== $new_rel is a link, rebuild the prefix for cloud saves ===" \
         >> "$log" 2>&1 || true
+      migration_failed=1
       continue
     fi
     held=
@@ -305,19 +313,26 @@ migrate_user_paths() {
     if [ -n "$held" ]; then
       echo "=== $held is a link, rebuild the prefix for cloud saves ===" \
         >> "$log" 2>&1 || true
+      migration_failed=1
       continue
     fi
     if [ -e "$old" ] && [ ! -L "$old" ]; then
       if ! merge_user_dir "$old" "$new"; then
         echo "=== $old_rel did not merge into $new_rel, left in place ===" \
           >> "$log" 2>&1 || true
+        migration_failed=1
         continue
       fi
-      rmdir "$old BACKUP" 2>/dev/null || true
-      if [ -e "$old BACKUP" ] || [ -L "$old BACKUP" ] \
-        || ! mv "$old" "$old BACKUP" 2>> "$log"; then
+      backup="$old BACKUP"
+      backup_number=2
+      while [ -e "$backup" ] || [ -L "$backup" ]; do
+        backup="$old BACKUP $backup_number"
+        backup_number=$((backup_number + 1))
+      done
+      if ! mv "$old" "$backup" 2>> "$log"; then
         echo "=== $old_rel could not be moved aside, cloud saves stay split ===" \
           >> "$log" 2>&1 || true
+        migration_failed=1
         continue
       fi
     fi
@@ -333,6 +348,7 @@ migrate_user_paths() {
         || true
     fi
   done
+  [ "$migration_failed" -eq 0 ]
 }
 
 lay_out_proton_profile() {
@@ -353,7 +369,7 @@ lay_out_proton_profile() {
       AppData/Local AppData/Roaming; do
     mkdir -p "$profile/$folder" 2>/dev/null || true
   done
-  migrate_user_paths "$profile"
+  migrate_user_paths "$profile" || return 1
   if [ -L "$users/crossover" ] && [ ! -e "$users/crossover" ]; then
     rm -f "$users/crossover" 2>/dev/null || true
   fi
@@ -402,33 +418,56 @@ if [ -z "$np_build" ] || [ ! -d "$CX_ROOT/lib/wine" ]; then
 fi
 echo "runner: build $np_build ($np_display) at $CX_ROOT" >> "$log" 2>&1 || true
 
-# A fresh prefix is close to a gigabyte of files that wineboot copies out of the
-# runner, and every game gets its own. Build one template per runner instead and seed
-# each game from it. Within a single APFS volume "cp -c" clones, so the files share
-# blocks and every prefix after the first costs almost nothing, as well as skipping
-# the wineboot that building one needs. Seeding this way is safe because a wine prefix
-# does not care where it lives: dosdevices holds "c: -> ../drive_c" and "z: -> /",
-# which both survive the move, and the template is built through the same steps in the
-# same order a game's prefix takes.
-template_root="$np_support/templates"
-# Keyed by the build this compatibility tool runs and by the unix arch. A build can be
-# installed alongside others, and one runner serves both flavors, which populate a
-# prefix from different PE sets, so both belong in the key.
+# Each CrossOver build needs its own template.
+# FEX builds need two, one for FEX/arm64 Wine and one for Rosetta/AMD64 Wine
 runner_id=""
-if [ -n "$np_build" ]; then
-  runner_id="crossover-$np_build-${wine_unix##*/}"
-fi
-template="$template_root/$runner_id/pfx"
+[ -z "$np_build" ] || runner_id="crossover-$np_build-${wine_unix##*/}"
 
-# A clone only shares blocks inside one volume, and a library can sit on a disk of its
-# own, so the template belongs beside the prefixes it seeds. compatdata is where those
-# prefixes already live, so it is always the right volume. The support directory stays
-# as the fallback for a run with no library path to derive one from.
-pick_template_dir() {
-  if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
-    template_root="$(dirname "$STEAM_COMPAT_DATA_PATH")/notproton-template"
+in_template_env() {
+  prefix="$1"
+  shift
+  env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-}" TMPDIR="${TMPDIR:-/tmp}" \
+    LANG="${LANG:-}" LC_ALL="${LC_ALL:-}" \
+    PATH="$CX_ROOT/bin:/usr/bin:/bin:/usr/sbin:/sbin" CX_ROOT="$CX_ROOT" CX_HOME="$CX_HOME" \
+    WINEDLLPATH="$CX_ROOT/lib/wine/x86_64-windows:$wine_unix" \
+    WINELOADER="$WINELOADER" WINESERVER="$WINESERVER" WINEPREFIX="$prefix" "$@"
+}
+
+seed_scratch=""
+seed_building=0
+# shellcheck disable=SC2329 # the traps in seed_prefix_from_template invoke this
+abandon_seed() {
+  if [ -n "$seed_scratch" ]; then
+    if [ "$seed_building" -eq 1 ]; then
+      in_template_env "$seed_scratch" "$WINESERVER" -k >/dev/null 2>&1 || true
+      in_template_env "$seed_scratch" "$WINESERVER" -w >/dev/null 2>&1 || exit "$1"
+    fi
+    rm -rf "$seed_scratch" 2>/dev/null || true
   fi
-  template="$template_root/$runner_id/pfx"
+  exit "$1"
+}
+
+prefix_server_dir() {
+  [ -n "${1:-$WINEPREFIX}" ] || return 1
+  ids=$(stat -f '%d-%i' "${1:-$WINEPREFIX}" 2>/dev/null) || return 1
+  [ -n "$ids" ] || return 1
+  printf '/tmp/.wine-%s/server-%s' "$(id -u)" \
+    "$(printf '%s' "$ids" | awk -F- '{printf "%x-%x", $1, $2}')"
+}
+
+sweep_dead_seeds() {
+  for leftover in "$@"; do
+    [ -d "$leftover" ] && [ ! -L "$leftover" ] || continue
+    case "${leftover##*.}" in ''|0|*[!0-9]*) continue ;; esac
+    [ "$(stat -f %u "$leftover" 2>/dev/null)" = "$(id -u)" ] || continue
+    kill -0 "${leftover##*.}" 2>/dev/null && continue
+    stale_server=$(prefix_server_dir "$leftover") || continue
+    if [ -d "$stale_server" ]; then
+      stale_users=$(lsof -t +D "$stale_server" 2>&1 || true)
+      [ -z "$stale_users" ] || continue
+    fi
+    rm -rf "$leftover" 2>/dev/null || true
+  done
 }
 
 same_volume() {
@@ -437,58 +476,248 @@ same_volume() {
   [ "$one" = "$two" ]
 }
 
-# Built under a temporary name and moved into place, so a second game starting
-# while this runs sees either no template or a finished one, never a partial tree.
-build_prefix_template() {
-  staging="$template_root/$runner_id/pfx.building.$$"
-  rm -rf "$staging" 2>/dev/null || true
-  mkdir -p "$staging" || return 1
-  echo "=== building the prefix template for $runner_id ===" >> "$log" 2>&1 || true
-  # Through the same steps a game's prefix takes, in the same order. A bare wineboot
-  # leaves a real users/crossover directory behind, which lay_out_proton_profile
-  # refuses to convert, so a prefix seeded from such a template would lose the
-  # steamuser layout that cloud saves are written through.
-  lay_out_proton_profile "$staging"
-  WINEPREFIX="$staging" "$WINELOADER" wineboot --init >> "$log" 2>&1 || true
-  WINEPREFIX="$staging" "$WINESERVER" -w >> "$log" 2>&1 || true
-  if [ ! -f "$staging/system.reg" ]; then
-    echo "=== wineboot produced no template, this game gets its own prefix ===" \
-      >> "$log" 2>&1 || true
-    rm -rf "$staging" 2>/dev/null || true
-    return 1
-  fi
-  if [ -f "$template/system.reg" ]; then
-    rm -rf "$staging" 2>/dev/null || true
-  else
-    mv "$staging" "$template" 2>/dev/null || rm -rf "$staging" 2>/dev/null || true
-  fi
-  [ -f "$template/system.reg" ]
+# On non-APFS file systems, a full copy is made rather than a clone.
+volume_clones() {
+  device=$(stat -f %Sd "$1" 2>/dev/null) || return 1
+  mount | grep -q "^/dev/$device on .* (apfs[,)]"
 }
 
-seed_prefix_from_template() {
-  if [ -z "$runner_id" ] || [ -f "$WINEPREFIX/system.reg" ]; then
-    return 0
+# Built in a temporary folder and renamed when the build finishes, so a broken template is never used
+build_prefix_template() {
+  sweep_dead_seeds "$template_dir"/pfx.building.*
+  seed_scratch="$template_dir/pfx.building.$$"
+  mkdir "$seed_scratch" || return 1
+  echo "=== building the prefix template for $runner_id ===" >> "$log" 2>&1 || true
+  # The Steam user folders have to exist before wineboot runs, or wineboot will make its own
+  # and cloud saves end up in the wrong place.
+  lay_out_proton_profile "$seed_scratch" || return 1
+  seed_building=1
+  in_template_env "$seed_scratch" "$WINELOADER" wineboot --init >> "$log" 2>&1 &
+  initialized=0
+  wait $! || initialized=$?
+  in_template_env "$seed_scratch" "$WINESERVER" -w >> "$log" 2>&1 &
+  if ! wait $!; then
+    echo "=== template server did not finish, leaving its staging folder intact ===" >> "$log" 2>&1 || true
+    seed_scratch=""
+    seed_building=0
+    return 1
   fi
-  pick_template_dir
-  if [ ! -f "$template/system.reg" ] && ! build_prefix_template; then
-    return 0
+  seed_building=0
+  if [ "$initialized" -ne 0 ] || [ ! -s "$seed_scratch/system.reg" ] \
+    || [ ! -s "$seed_scratch/user.reg" ] || [ ! -s "$seed_scratch/userdef.reg" ]; then
+    echo "=== wineboot produced no template, this game gets its own prefix ===" \
+      >> "$log" 2>&1 || true
+    rm -rf "$seed_scratch" 2>/dev/null || true
+    seed_scratch=""
+    return 1
   fi
+  if [ ! -e "$template_dir/pfx" ] && [ ! -L "$template_dir/pfx" ]; then
+    mv "$seed_scratch" "$template_dir/pfx" 2>/dev/null || true
+  fi
+  rm -rf "$seed_scratch" 2>/dev/null || true
+  seed_scratch=""
+  [ -f "$template_dir/pfx/system.reg" ]
+}
 
-  if same_volume "$template" "$WINEPREFIX" \
-    && cp -c -R "$template/." "$WINEPREFIX/" 2>/dev/null; then
-    echo "=== cloned this prefix from the $runner_id template ===" >> "$log" 2>&1 || true
-  elif cp -R "$template/." "$WINEPREFIX/" 2>/dev/null; then
-    echo "=== copied this prefix from the $runner_id template, not a clone ===" \
-      >> "$log" 2>&1 || true
+install_seed_tree() (
+  set -- ""
+  while [ "$#" -gt 0 ]; do
+    relative=$1
+    shift
+    source_dir="$seed_scratch$relative"
+    target_dir="$WINEPREFIX$relative"
+    [ -d "$target_dir" ] && [ ! -L "$target_dir" ] || return 1
+    [ -r "$source_dir" ] && [ -x "$source_dir" ] || return 1
+    for source in "$source_dir"/* "$source_dir"/.[!.]* "$source_dir"/..?*; do
+      [ -e "$source" ] || [ -L "$source" ] || continue
+      name=${source##*/}
+      if [ -z "$relative" ]; then
+        case "$name" in system.reg|.update-timestamp) continue ;; esac
+      fi
+      target="$target_dir/$name"
+      if [ -d "$source" ] && [ ! -L "$source" ]; then
+        if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+          mkdir "$target" || return 1
+        fi
+        [ -d "$target" ] && [ ! -L "$target" ] || return 1
+        set -- "$@" "$relative/$name"
+      elif [ -e "$target" ] || [ -L "$target" ]; then
+        case "$relative/$name" in
+          /drive_c/users/steamuser/*) continue ;;
+        esac
+        [ -L "$source" ] && [ -L "$target" ] \
+          && [ "$(readlink "$source")" = "$(readlink "$target")" ] || return 1
+      elif [ -L "$source" ]; then
+        ln -sh "$(readlink "$source")" "$target" || return 1
+        [ -L "$target" ] && [ "$(readlink "$source")" = "$(readlink "$target")" ] || return 1
+      elif [ -f "$source" ]; then
+        ln -h "$source" "$target" || return 1
+        [ ! -L "$target" ] && [ "$source" -ef "$target" ] || return 1
+      else
+        return 1
+      fi
+    done
+  done
+  ln -h "$seed_scratch/system.reg" "$WINEPREFIX/system.reg" \
+    && [ ! -L "$WINEPREFIX/system.reg" ] \
+    && [ "$seed_scratch/system.reg" -ef "$WINEPREFIX/system.reg" ] || return 1
+  if [ -f "$seed_scratch/.update-timestamp" ]; then
+    ln -h "$seed_scratch/.update-timestamp" "$WINEPREFIX/.update-timestamp" || return 1
+  fi
+)
+
+copy_template_into_prefix() {
+  seed_scratch="$STEAM_COMPAT_DATA_PATH/pfx.seeding.$$"
+  if ! mkdir "$seed_scratch" 2>/dev/null; then
+    echo "=== prefix staging folder is occupied, skipping the template ===" >> "$log" 2>&1 || true
+    seed_scratch=""
+    return 0
+  fi
+  if same_volume "$template_dir" "$STEAM_COMPAT_DATA_PATH" && volume_clones "$template_dir"; then
+    how="cloned this prefix from the $runner_id template"
+    cp -c -R "$template_dir/pfx/." "$seed_scratch" 2>/dev/null && copied=0 || copied=$?
   else
-    echo "=== could not seed from the template, it will be built from scratch ===" \
+    how="copied this prefix from the $runner_id template, not a clone"
+    cp -R "$template_dir/pfx/." "$seed_scratch" 2>/dev/null && copied=0 || copied=$?
+  fi
+  if [ "$copied" -eq 0 ] && prefix_is_bare && install_seed_tree; then
+    echo "=== $how ===" >> "$log" 2>&1 || true
+  else
+    echo "=== could not seed from the template, wine builds this prefix itself ===" \
       >> "$log" 2>&1 || true
   fi
+  rm -rf "$seed_scratch" 2>/dev/null || true
+  seed_scratch=""
+}
+
+prefix_is_bare() (
+  set -- ""
+  while [ "$#" -gt 0 ]; do
+    relative=$1
+    shift
+    directory="$WINEPREFIX$relative"
+    [ -d "$directory" ] && [ ! -L "$directory" ] \
+      && [ -r "$directory" ] && [ -x "$directory" ] || return 1
+    for node in "$directory"/* "$directory"/.[!.]* "$directory"/..?*; do
+      [ -e "$node" ] || [ -L "$node" ] || continue
+      part="$relative/${node##*/}"
+      if [ -L "$node" ]; then
+        case "$part:$(readlink "$node")" in
+          /dosdevices/c::../drive_c|/dosdevices/z::/|/drive_c/users/crossover:steamuser|\
+          '/drive_c/users/steamuser/My Documents:./Documents'|\
+          '/drive_c/users/steamuser/Application Data:./AppData/Roaming'|\
+          '/drive_c/users/steamuser/Local Settings/Application Data:../AppData/Local') continue ;;
+          *) return 1 ;;
+        esac
+      fi
+      case "$part" in
+        /drive_c|/drive_c/users|/drive_c/users/steamuser|/dosdevices)
+          [ -d "$node" ] || return 1 ;;
+        /drive_c/users/steamuser/*)
+          [ -d "$node" ] || [ -f "$node" ] || return 1 ;;
+        *) return 1 ;;
+      esac
+      if [ -d "$node" ]; then set -- "$@" "$part"; fi
+    done
+  done
+)
+
+template_identity() (
+  stat -f '%d:%i:%c' "$CX_ROOT" || return 1
+  /usr/bin/shasum -a 256 < "$np_tool_dir/run" || return 1
+  cd "$CX_ROOT" || return 1
+  set -- "$WINELOADER" "$WINESERVER" share/wine/wine.inf
+  for file in lib/wine/*-windows/ntdll.dll lib/wine/*-windows/lsteamclient.dll \
+    lib/wine/*-unix/lsteamclient.so; do
+    [ ! -f "$file" ] || set -- "$@" "$file"
+  done
+  /usr/bin/shasum -a 256 "$@"
+)
+
+# Each game's prefix is copied from one template (per runner) instead of running wineboot.
+# On APFS the copy is a clone, so it takes almost no space.
+seed_prefix_from_template() {
+  sweep_dead_seeds "$STEAM_COMPAT_DATA_PATH"/pfx.seeding.*
+  [ -n "$runner_id" ] || return 0
+  if ! prefix_is_bare; then
+    [ -f "$WINEPREFIX/system.reg" ] \
+      || echo "=== prefix is not empty or a standalone Steam profile, skipping the template ===" \
+        >> "$log" 2>&1 || true
+    return 0
+  fi
+  # Since a user can have more than one Steam library and libraries can be on different drives,
+  # the template is stored alongside the Steam library to support APFS cloning.
+  template_cache="$(dirname "$STEAM_COMPAT_DATA_PATH")/notproton-template"
+  template_lock="$(dirname "$STEAM_COMPAT_DATA_PATH")/.notproton-template.lock"
+  [ ! -L "$template_cache" ] && [ ! -L "$template_lock" ] || return 0
+  [ ! -e "$template_lock" ] || [ -f "$template_lock" ] || return 0
+  if ! { : >> "$template_lock"; } 2>/dev/null; then
+    echo "=== prefix template cache is not writable, skipping the template ===" >> "$log" 2>&1 || true
+    return 0
+  fi
+  exec 9>> "$template_lock"
+  if ! /usr/bin/lockf -s -t 0 9; then
+    exec 9>&-
+    echo "=== prefix templates are busy, wine builds this prefix itself ===" >> "$log" 2>&1 || true
+    return 0
+  fi
+  template_dir="$template_cache/$runner_id"
+  if [ -L "$template_cache" ] || [ -L "$template_dir" ] \
+    || ! mkdir -p "$template_dir"; then exec 9>&-; return 0; fi
+  if ! identity=$(template_identity); then exec 9>&-; return 0; fi
+  trap 'abandon_seed 143' TERM
+  trap 'abandon_seed 130' INT
+  trap 'abandon_seed 129' HUP
+  if [ -L "$template_dir/pfx" ] || [ -L "$template_dir/ready" ] \
+    || { [ -e "$template_dir/pfx" ] && [ ! -d "$template_dir/pfx" ]; } \
+    || { [ -e "$template_dir/ready" ] && [ ! -f "$template_dir/ready" ]; }; then
+    exec 9>&-
+    trap - TERM INT HUP
+    return 0
+  fi
+  if [ ! -s "$template_dir/pfx/system.reg" ] \
+    || [ "$(cat "$template_dir/ready" 2>/dev/null)" != "$identity" ]; then
+    if ! rm -f "$template_dir/ready" || ! rm -rf "$template_dir/pfx"; then
+      echo "=== could not invalidate the old prefix template, skipping it ===" >> "$log" 2>&1 || true
+      exec 9>&-
+      trap - TERM INT HUP
+      return 0
+    fi
+    if build_prefix_template; then
+      if ! printf '%s\n' "$identity" > "$template_dir/ready"; then
+        rm -f "$template_dir/ready" 2>/dev/null || true
+      fi
+    fi
+  fi
+  if [ "$(cat "$template_dir/ready" 2>/dev/null)" = "$identity" ] \
+    && [ -s "$template_dir/pfx/system.reg" ]; then
+    copy_template_into_prefix
+  fi
+  exec 9>&-
+  trap - TERM INT HUP
+}
+
+prepare_prefix_directory() {
+  mkdir -p "$STEAM_COMPAT_DATA_PATH" || return 1
+  prefix_lock="$STEAM_COMPAT_DATA_PATH/.notproton-prefix.lock"
+  [ ! -L "$prefix_lock" ] && { [ ! -e "$prefix_lock" ] || [ -f "$prefix_lock" ]; } || return 1
+  exec 8>> "$prefix_lock"
+  if ! /usr/bin/lockf -s -t 0 8; then
+    echo "=== another launch is preparing this prefix ===" >> "$log" 2>&1 || true
+    return 1
+  fi
+  for interrupted in "$STEAM_COMPAT_DATA_PATH"/pfx.replaced.*; do
+    [ -e "$interrupted" ] || [ -L "$interrupted" ] || continue
+    echo "=== interrupted prefix replacement needs recovery: $interrupted ===" >> "$log" 2>&1 || true
+    show_alert "Prefix recovery required" "An interrupted prefix replacement may hold saved games. Do not delete this prefix. Check its notproton-run.log for the recovery folder."
+    exit 1
+  done
+  mkdir -p "$WINEPREFIX"
 }
 
 if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
-  mkdir -p "$WINEPREFIX"
+  prepare_prefix_directory
   msync_from=environment
   if [ -z "$WINEMSYNC" ] && [ -r "$STEAM_COMPAT_DATA_PATH/notproton-msync" ]; then
     WINEMSYNC=$(tr -d ' \t\n' \
@@ -509,7 +738,10 @@ if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   stage_step="prefix seed"
   seed_prefix_from_template
   stage_step="profile layout"
-  lay_out_proton_profile
+  if ! lay_out_proton_profile; then
+    show_alert "Saved-game folders need attention" "NotProton left the conflicting files in place. Open this prefix's notproton-run.log for details before trying again."
+    exit 1
+  fi
   echo "video: RetinaMode=${NOTPROTON_RETINA:-0}" >> "$log" 2>&1 || true
   stage_step="prefix settings"
   import_prefix_settings
@@ -631,6 +863,7 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
 fi
 
 export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
+exec 8>&-
 trap - EXIT
 echo "launch_args=$launch_args" >> "$log" 2>&1 || true
 [ -z "$launch_env" ] || echo "launch_env=$launch_env" >> "$log" 2>&1 || true
@@ -848,14 +1081,6 @@ wine_helpers="$wine_helpers|wineboot\.exe|rundll32\.exe|tabtip\.exe"
 wine_helpers="$wine_helpers|vc_redist|vcredist|dxsetup\.exe|msiexec\.exe"
 wine_helpers="$wine_helpers|installinf|iscriptevaluator\.exe|regsvr32\.exe"
 wine_helpers="$wine_helpers|winedbg\.exe|unitycrashhandler"
-prefix_server_dir() {
-  [ -n "$WINEPREFIX" ] || return 1
-  ids=$(stat -f '%d-%i' "$WINEPREFIX" 2>/dev/null) || return 1
-  [ -n "$ids" ] || return 1
-  printf '/tmp/.wine-%s/server-%s' "$(id -u)" \
-    "$(printf '%s' "$ids" | awk -F- '{printf "%x-%x", $1, $2}')"
-}
-
 prefix_game_running() {
   command -v lsof >/dev/null 2>&1 || return 1
   dir=$(prefix_server_dir) || return 1

@@ -50,6 +50,7 @@ struct StatusRow: View {
     var tone: StatusTone?
     var detail: String?
     var trailing: String?
+    var trailingHelp: LocalizedStringResource = ""
     var secondaryAction: StatusAction?
     var action: StatusAction?
     var menu: [StatusAction] = []
@@ -91,6 +92,8 @@ struct StatusRow: View {
                 Text(trailing)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .help(Text(trailingHelp))
                     .padding(.trailing, action == nil && menu.isEmpty ? 0 : 8)
             }
             if let toggle {
@@ -297,6 +300,10 @@ struct StatusView: View {
                 StatusRow(title: "Done", value: outcome, tone: .ok)
             }
 
+            if let failure = status.templateCleanupFailure {
+                StatusRow(title: "Template cleanup incomplete", value: failure, tone: .warning)
+            }
+
             if let activity = status.activity {
                 HStack(spacing: 10) {
                     ProgressView()
@@ -469,6 +476,7 @@ struct StatusView: View {
                 tone: crossOverTone(row),
                 detail: crossOverDetail(row, tools: tools),
                 trailing: row.copy == .ready ? buildSize(row.buildID) : nil,
+                trailingHelp: "Runner and template allocated footprints are shown separately. Templates include mounted Steam libraries and may share APFS extents with prefixes. These are not additive physical usage or guaranteed space reclaimed by deletion.",
                 action: crossOverAction(row, prominent: snapshot.runner == .none),
                 menu: crossOverMenu(row)
             )
@@ -585,9 +593,24 @@ struct StatusView: View {
     }
 
     private func buildSize(_ build: String) -> String? {
-        status.runnerSizes[build].map {
-            ByteCountFormatter.string(fromByteCount: $0, countStyle: .file)
+        guard let runner = status.runnerSizes[build] else { return nil }
+        let flavors = SupportedRunners.build(id: build)?.tools.map(\.flavor) ?? []
+        return Self.sizeText(runner: runner, templates: status.templateSizes[build] ?? [:], flavors: flavors)
+    }
+
+    nonisolated static func sizeText(runner: Int64, templates: [CompatTool.Flavor: Int64], flavors: [CompatTool.Flavor]) -> String {
+        let lines: [String]
+        if flavors.count > 1 {
+            lines = flavors.compactMap { flavor in
+                guard let bytes = templates[flavor], bytes > 0 else { return nil }
+                let name = flavor == .fex ? "FEX" : "Rosetta"
+                return "\(name) templates \(bytes.formatted(.byteCount(style: .file)))"
+            }
+        } else {
+            let bytes = templates.values.reduce(0, +)
+            lines = bytes > 0 ? ["Templates \(bytes.formatted(.byteCount(style: .file)))"] : []
         }
+        return (["Runner \(runner.formatted(.byteCount(style: .file)))"] + lines).joined(separator: "\n")
     }
 
     private func removeCopyAction(_ build: String, label: String) -> StatusAction {

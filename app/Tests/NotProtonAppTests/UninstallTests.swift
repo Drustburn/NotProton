@@ -208,6 +208,7 @@ struct UninstallTests {
             legacyCompat: layout.legacyCompat,
             compatTools: layout.compatTools,
             directories: [layout.support, layout.caches],
+            libraries: [],
             repair: { _ in throw Offline() },
             stop: { _ in false }
         )
@@ -241,6 +242,7 @@ struct UninstallTests {
             legacyCompat: layout.legacyCompat,
             compatTools: layout.compatTools,
             directories: [layout.support, caches],
+            libraries: [],
             repair: { _ in
                 let staged = caches.appending(path: "bundle")
                 try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
@@ -268,6 +270,7 @@ struct UninstallTests {
             legacyCompat: layout.legacyCompat,
             compatTools: layout.compatTools,
             directories: [layout.support, layout.caches],
+            libraries: [],
             report: { log.add($0) },
             repair: { report in
                 report(.checking)
@@ -290,4 +293,53 @@ struct UninstallTests {
         #expect(labels.contains(RepairPhase.replacing.label))
     }
 
+    @Test("Uninstall removes templates of installed builds but keeps unrelated library data")
+    func removesLibraryTemplates() async throws {
+        let layout = try layout()
+        defer { try? FileManager.default.removeItem(at: layout.root) }
+        let library = SteamLibrary(root: layout.root.appending(path: "library"))
+        let build = "26.3.0.39832"
+        let templates = SupportPaths.prefixTemplates(forBuild: build, in: library)
+        for template in templates {
+            try FileManager.default.createDirectory(at: template, withIntermediateDirectories: true)
+        }
+        try FileManager.default.createDirectory(
+            at: SupportPaths.clonedRoot(forBuild: build, runners: layout.support.appending(path: "runners")),
+            withIntermediateDirectories: true)
+        let unrelated = templates[0].deletingLastPathComponent().appending(path: "notes")
+        try Data("keep".utf8).write(to: unrelated)
+
+        _ = try await Uninstall.run(
+            app: layout.app, innerPlist: layout.innerPlist, updateBlocks: [layout.updateBlock],
+            legacyCompat: layout.legacyCompat, compatTools: layout.compatTools,
+            directories: [layout.support, layout.caches], libraries: [library],
+            repair: { _ in }, stop: { _ in false })
+
+        for template in templates { #expect(!FileManager.default.fileExists(atPath: template.path)) }
+        #expect(try String(contentsOf: unrelated, encoding: .utf8) == "keep")
+        #expect(FileManager.default.fileExists(atPath: library.compatdata.appending(path: ".notproton-template.lock").path))
+    }
+
+    @Test("Uninstall reports template cleanup refusal rather than claiming completion")
+    func reportsTemplateCleanupFailure() async throws {
+        let layout = try layout()
+        defer { try? FileManager.default.removeItem(at: layout.root) }
+        let library = SteamLibrary(root: layout.root.appending(path: "library"))
+        try FileManager.default.createDirectory(at: library.compatdata, withIntermediateDirectories: true)
+        let outside = layout.root.appending(path: "outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let sentinel = outside.appending(path: "crossover-26.3.0.39832-x86_64-unix")
+        try Data("keep".utf8).write(to: sentinel)
+        try FileManager.default.createSymbolicLink(
+            at: library.compatdata.appending(path: SupportPaths.prefixTemplateFolder), withDestinationURL: outside)
+
+        await #expect(throws: StepFailure.self) {
+            _ = try await Uninstall.run(
+                app: layout.app, innerPlist: layout.innerPlist, updateBlocks: [layout.updateBlock],
+                legacyCompat: layout.legacyCompat, compatTools: layout.compatTools,
+                directories: [layout.support, layout.caches], libraries: [library],
+                repair: { _ in }, stop: { _ in false })
+        }
+        #expect(try String(contentsOf: sentinel, encoding: .utf8) == "keep")
+    }
 }

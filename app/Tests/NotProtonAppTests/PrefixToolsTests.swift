@@ -1031,7 +1031,7 @@ struct PrefixToolsTests {
         let source = try Self.compatSource()
 
         let definition = try #require(source.range(of: "lay_out_proton_profile() {"))
-        let call = try #require(source.range(of: "  lay_out_proton_profile\n"))
+        let call = try #require(source.range(of: "  if ! lay_out_proton_profile; then\n"))
         let settings = try #require(source.range(of: "  import_prefix_settings\n"))
 
         // sh reads a script top to bottom, so a call above the definition is only an
@@ -1132,7 +1132,7 @@ struct PrefixToolsTests {
         let source = try Self.compatSource()
 
         let definition = try #require(source.range(of: "migrate_user_paths() {"))
-        let call = try #require(source.range(of: "  migrate_user_paths \"$profile\"\n"))
+        let call = try #require(source.range(of: "  migrate_user_paths \"$profile\" || return 1\n"))
         let layout = try #require(source.range(of: "lay_out_proton_profile() {"))
 
         // sh reads a script top to bottom, so a call above the definition is only an
@@ -1267,7 +1267,7 @@ struct PrefixToolsTests {
         let source = try Self.compatSource()
 
         let gate = try #require(source.range(of: #"if ! merge_user_dir "$old" "$new"; then"#))
-        let rename = try #require(source.range(of: #"mv "$old" "$old BACKUP""#))
+        let rename = try #require(source.range(of: #"mv "$old" "$backup""#))
         #expect(gate.lowerBound < rename.lowerBound)
         // A bare call could not report anything: the walk reads from a pipe, so it runs in a
         // subshell and only the group's status comes back.
@@ -1286,7 +1286,7 @@ struct PrefixToolsTests {
         let source = try Self.compatSource()
 
         let refusal = try #require(source.range(of: #"if [ -L "$new" ]; then"#))
-        let rename = try #require(source.range(of: #"mv "$old" "$old BACKUP""#))
+        let rename = try #require(source.range(of: #"mv "$old" "$backup""#))
         #expect(refusal.lowerBound < rename.lowerBound)
     }
 

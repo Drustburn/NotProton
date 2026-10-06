@@ -1,5 +1,6 @@
 // Clones CrossOver's Wine runtime into ~/Library/Application Support/notproton/runners
 
+import Darwin
 import Foundation
 
 enum RunnerInstaller {
@@ -50,6 +51,7 @@ enum RunnerInstaller {
         bridge: URL = SupportPaths.bridge,
         toolList: URL = SupportPaths.toolList,
         compatTools: URL = SupportPaths.Steam.compatTools,
+        libraries: [SteamLibrary] = PrefixStore.libraries(),
         running: (URL) -> Bool = { RunnerInstaller.isRunning(from: $0) }
     ) throws -> Bool {
         let target = SupportPaths.runnerRoot(forBuild: build, runners: runners)
@@ -66,9 +68,123 @@ enum RunnerInstaller {
         }
 
         try WriteRefused.catching(path) { try FileManager.default.removeItem(at: target) }
-        return try CompatToolList.sync(
+        let changed = try CompatToolList.sync(
             runners: runners, bridge: bridge, file: toolList, compatTools: compatTools
         )
+        let failures = removeStalePrefixTemplates(runners: runners, libraries: libraries)
+        if !failures.isEmpty {
+            throw StepFailure(step: removeStep, detail: failures.map(\.detail).joined(separator: "\n"))
+        }
+        return changed
+    }
+
+    // Also catches templates left on a drive that was not present (unplugged or unmounted)
+    // at the time the deployed copy of CrossOver was removed.
+    static func removeStalePrefixTemplates(runners: URL, libraries: [SteamLibrary]) -> [StepFailure] {
+        removePrefixTemplates(keeping: Set(RunnerStore.clonedBuilds(in: runners)), libraries: libraries)
+    }
+
+    static func removePrefixTemplates(keeping builds: Set<String>, libraries: [SteamLibrary]) -> [StepFailure] {
+        var failures: [StepFailure] = []
+        for library in libraries {
+            let kept = Set(builds.flatMap {
+                SupportPaths.prefixTemplates(forBuild: $0, in: library).map(\.lastPathComponent)
+            })
+            let folder = library.compatdata.appending(path: SupportPaths.prefixTemplateFolder)
+            do {
+                let parent = open(library.compatdata.path(percentEncoded: false), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                guard parent >= 0 else {
+                    if errno == ENOENT { continue }
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                defer { close(parent) }
+                var cacheInfo = stat()
+                guard fstatat(parent, SupportPaths.prefixTemplateFolder, &cacheInfo, AT_SYMLINK_NOFOLLOW) == 0 else {
+                    if errno == ENOENT { continue }
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                let lock = openat(parent, ".notproton-template.lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+                guard lock >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+                defer { close(lock) }
+                var lockInfo = stat()
+                guard fstat(lock, &lockInfo) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+                guard lockInfo.st_mode & S_IFMT == S_IFREG else { throw POSIXError(.EINVAL) }
+                guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+
+                let root = openat(parent, SupportPaths.prefixTemplateFolder, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                guard root >= 0 else {
+                    if errno == ENOENT { continue }
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                defer { close(root) }
+                var info = stat()
+                guard fstat(root, &info) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+                guard info.st_mode & S_IFMT == S_IFDIR else { throw POSIXError(.ENOTDIR) }
+
+                for name in try templateDirectoryNames(root) where !kept.contains(name) {
+                    guard name.wholeMatch(of: #/crossover-[A-Za-z0-9.-]+-(x86_64|aarch64)-unix/#) != nil else { continue }
+                    do {
+                        try removeTemplateEntry(name, in: root, device: info.st_dev)
+                    } catch {
+                        failures.append(StepFailure(
+                            step: removeStep,
+                            detail: "Could not remove prefix template \(folder.appending(path: name).path(percentEncoded: false)): \(error.localizedDescription) Refresh to retry."
+                        ))
+                    }
+                }
+            } catch {
+                failures.append(StepFailure(
+                    step: removeStep,
+                    detail: "Could not clean prefix templates at \(folder.path(percentEncoded: false)): \(error.localizedDescription) Refresh to retry."
+                ))
+            }
+        }
+        return failures
+    }
+
+    private static func templateDirectoryNames(_ fd: Int32) throws -> [String] {
+        let copy = dup(fd)
+        guard copy >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        guard let directory = fdopendir(copy) else {
+            let code = errno
+            close(copy)
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+        defer { closedir(directory) }
+        var names: [String] = []
+        while true {
+            errno = 0
+            guard let entry = readdir(directory) else {
+                guard errno == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+                return names
+            }
+            let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(entry.pointee.d_namlen) + 1) { String(cString: $0) }
+            }
+            if name != ".", name != ".." { names.append(name) }
+        }
+    }
+
+    private static func removeTemplateEntry(_ name: String, in parent: Int32, device: dev_t) throws {
+        var info = stat()
+        guard fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else {
+            if errno == ENOENT { return }
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        if info.st_mode & S_IFMT == S_IFDIR {
+            let child = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard child >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            defer { close(child) }
+            var opened = stat()
+            guard fstat(child, &opened) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            guard opened.st_dev == device, opened.st_ino == info.st_ino else { throw POSIXError(.EBUSY) }
+            for entry in try templateDirectoryNames(child) {
+                try removeTemplateEntry(entry, in: child, device: device)
+            }
+            guard unlinkat(parent, name, AT_REMOVEDIR) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        } else {
+            guard unlinkat(parent, name, 0) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        }
     }
 
     // Wine keeps a wineserver running inside the clone, so a process running from there is a

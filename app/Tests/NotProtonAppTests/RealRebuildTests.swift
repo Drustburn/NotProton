@@ -16,6 +16,7 @@ enum RealPrefixes {
     static var tool: InstalledTool? { CompatToolList.installed().first }
 
     static var candidates: [WinePrefix] {
+        guard ProcessInfo.processInfo.environment["NOTPROTON_TEST_WINE"] == "1" else { return [] }
         guard tool != nil else { return [] }
         func realDirectory(_ url: URL) -> Bool {
             let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])

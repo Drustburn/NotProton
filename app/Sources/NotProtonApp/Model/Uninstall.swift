@@ -44,6 +44,7 @@ enum Uninstall {
             SupportPaths.support,
             SupportPaths.packageDownloads.deletingLastPathComponent(),
         ],
+        libraries: [SteamLibrary] = PrefixStore.libraries(),
         report: @escaping @Sendable (UninstallPhase) -> Void = { _ in },
         repair: Repair = { report in _ = try await SteamRepair.run(report: report) },
         stop: Stop = { onStopping in try SteamBundle.stopClient(step: step, onStopping: onStopping) }
@@ -65,6 +66,10 @@ enum Uninstall {
         let removed = try remove(
             legacyCompat: legacyCompat, compatTools: compatTools, directories: directories
         )
+        let templateFailures = RunnerInstaller.removePrefixTemplates(keeping: [], libraries: libraries)
+        if !templateFailures.isEmpty {
+            throw StepFailure(step: step, detail: templateFailures.map(\.detail).joined(separator: "\n"))
+        }
 
         report(.finished)
         return UninstallOutcome(

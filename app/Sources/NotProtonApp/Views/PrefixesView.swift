@@ -256,11 +256,12 @@ struct PrefixesView: View {
             }
             .width(min: 44, ideal: libraryWidth)
 
-            TableColumn("Size") { prefix in
+            TableColumn("Private Size") { prefix in
                 if let usage = model.usage[prefix.id] {
                     Text(usage.bytes.formatted(.byteCount(style: .file)))
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
+                        .help(Text(PrefixStore.privateSizeHelp))
                 } else {
                     Text("Calculating…")
                         .foregroundStyle(contrast == .increased ? .secondary : .tertiary)

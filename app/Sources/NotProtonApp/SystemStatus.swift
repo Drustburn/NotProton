@@ -439,23 +439,38 @@ final class SystemStatus {
         }.value
         snapshot = captured
         AppLog.note(captured)
-        await measureRunnerSizes()
+        await refreshRunnerStorage()
     }
 
     private(set) var runnerSizes: [String: Int64] = [:]
+    private(set) var templateSizes: [String: [CompatTool.Flavor: Int64]] = [:]
+    private(set) var templateCleanupFailure: String?
 
-    func measureRunnerSizes() async {
-        let known = Set(runnerSizes.keys)
-        let present = await Task.detached(priority: .utility) {
-            Set(RunnerStore.clonedBuilds())
+    func refreshRunnerStorage(
+        runners: URL = SupportPaths.runners, libraries: [SteamLibrary] = PrefixStore.libraries()
+    ) async {
+        let known = runnerSizes
+        let measured = await Task.detached(priority: .utility) {
+            let failures = RunnerInstaller.removeStalePrefixTemplates(runners: runners, libraries: libraries)
+            var sizes: [String: Int64] = [:]
+            var templates: [String: [CompatTool.Flavor: Int64]] = [:]
+            for build in RunnerStore.clonedBuilds(in: runners) {
+                sizes[build] = known[build] ?? RunnerStore.cloneSize(forBuild: build, runners: runners)
+                templates[build] = libraries.reduce(into: [:]) { totals, library in
+                    let folder = library.compatdata.appending(path: SupportPaths.prefixTemplateFolder)
+                    var info = stat()
+                    guard lstat(folder.path(percentEncoded: false), &info) == 0,
+                        info.st_mode & S_IFMT == S_IFDIR else { return }
+                    for flavor in [CompatTool.Flavor.rosetta, .fex] {
+                        let template = SupportPaths.prefixTemplate(forBuild: build, flavor: flavor, in: library)
+                        totals[flavor, default: 0] += PrefixStore.directoryBytes(template, metric: .allocated)
+                    }
+                }
+            }
+            return (sizes, templates, failures)
         }.value
-
-        for stale in known.subtracting(present) { runnerSizes[stale] = nil }
-
-        for build in present.subtracting(known) {
-            runnerSizes[build] = await Task.detached(priority: .utility) {
-                RunnerStore.cloneSize(forBuild: build)
-            }.value
-        }
+        runnerSizes = measured.0
+        templateSizes = measured.1
+        templateCleanupFailure = measured.2.isEmpty ? nil : measured.2.map(\.detail).joined(separator: "\n")
     }
 }
