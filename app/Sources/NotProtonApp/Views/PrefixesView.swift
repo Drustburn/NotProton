@@ -6,6 +6,7 @@ struct PrefixesView: View {
 
     @Environment(PrefixesModel.self) private var model
     @Environment(\.colorSchemeContrast) private var contrast
+    @State private var sortOrder = [KeyPathComparator(\PrefixRow.lastUsed, order: .reverse)]
 
     var body: some View {
         Group {
@@ -199,10 +200,38 @@ struct PrefixesView: View {
         return widest + TextWidth.cellPadding
     }
 
+    private struct PrefixRow: Identifiable {
+        let prefix: WinePrefix
+        let tool: String
+        let appID: Int
+        let size: Int64
+        let title: String
+        let library: String
+        let lastUsed: Date
+
+        var id: WinePrefix.ID { prefix.id }
+    }
+
+    private var rows: [PrefixRow] {
+        model.prefixes.map { prefix in
+            PrefixRow(
+                prefix: prefix,
+                tool: model.lastTool(prefix) ?? "",
+                appID: Int(prefix.appID) ?? 0,
+                size: model.usage[prefix.id]?.bytes ?? -1,
+                title: prefix.title,
+                library: prefix.library.displayName,
+                lastUsed: prefix.lastUsed ?? .distantPast
+            )
+        }
+        .sorted(using: sortOrder)
+    }
+
     private var table: some View {
         @Bindable var model = model
-        return Table(model.prefixes, selection: $model.selection) {
-            TableColumn("Game") { prefix in
+        return Table(rows, selection: $model.selection, sortOrder: $sortOrder) {
+            TableColumn("Game", value: \.title) { row in
+                let prefix = row.prefix
                 HStack(spacing: 6) {
                     if model.isStale(prefix) {
                         Menu {
@@ -234,7 +263,8 @@ struct PrefixesView: View {
             }
             .width(min: 60, ideal: gameWidth)
 
-            TableColumn("Tool") { prefix in
+            TableColumn("Tool", value: \.tool) { row in
+                let prefix = row.prefix
                 if let tool = model.lastTool(prefix) {
                     Text(tool).foregroundStyle(.secondary).help(tool)
                 } else {
@@ -244,20 +274,20 @@ struct PrefixesView: View {
             }
             .width(min: 60, ideal: toolWidth)
 
-            TableColumn("App ID") { prefix in
-                Text(prefix.appID).monospacedDigit().foregroundStyle(.secondary)
+            TableColumn("App ID", value: \.appID) { row in
+                Text(row.prefix.appID).monospacedDigit().foregroundStyle(.secondary)
             }
             .width(min: 50, ideal: 80)
 
-            TableColumn("Library") { prefix in
-                Text(prefix.library.displayName)
+            TableColumn("Library", value: \.library) { row in
+                Text(row.library)
                     .foregroundStyle(.secondary)
-                    .help(prefix.library.displayName)
+                    .help(row.library)
             }
             .width(min: 44, ideal: libraryWidth)
 
-            TableColumn("Private Size") { prefix in
-                if let usage = model.usage[prefix.id] {
+            TableColumn("Private Size", value: \.size) { row in
+                if let usage = model.usage[row.id] {
                     Text(usage.bytes.formatted(.byteCount(style: .file)))
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
@@ -269,13 +299,12 @@ struct PrefixesView: View {
             }
             .width(min: 56, ideal: 90)
 
-            TableColumn("Last used") { prefix in
-                Text(lastUsed(prefix))
+            TableColumn("Last used", value: \.lastUsed) { row in
+                Text(lastUsed(row.prefix))
                     .foregroundStyle(.secondary)
-                    .help(lastUsed(prefix))
+                    .help(lastUsed(row.prefix))
             }
             .width(min: 60, ideal: lastUsedWidth)
-
 
         }
         .contextMenu(forSelectionType: WinePrefix.ID.self) { ids in
@@ -319,7 +348,7 @@ struct PrefixesView: View {
     @ViewBuilder
     private func rebuildChoices(_ targets: [WinePrefix], label: String? = nil) -> some View {
         ForEach(model.tools) { tool in
-            Button(label ?? tool.display) {
+            Button(label ?? tool.shortDisplay) {
                 model.pendingConfirmation = .rebuild(targets, tool)
             }
         }

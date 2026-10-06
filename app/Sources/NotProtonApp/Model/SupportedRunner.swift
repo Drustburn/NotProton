@@ -38,16 +38,21 @@ struct RunnerBuild: Sendable, Equatable, Identifiable {
 }
 
 struct CompatTool: Sendable, Hashable, Identifiable {
-    enum Flavor: String, Sendable {
-        case fex
+    enum Flavor: String, Sendable, CaseIterable {
         case rosetta
+        case fex
+
+        var name: String { self == .fex ? "FEX" : "Rosetta" }
+        var unixDir: String { self == .fex ? "aarch64-unix" : "x86_64-unix" }
     }
 
     let name: String
     let flavor: Flavor
     let display: String
+    var short: String? = nil
 
     var id: String { name }
+    var shortDisplay: String { short ?? display }
 
     var prefixArch: PrefixArch { flavor == .fex ? .arm64 : .x86_64 }
 }
@@ -59,6 +64,7 @@ struct InstalledTool: Sendable, Hashable, Identifiable {
     var id: String { tool.name }
     var name: String { tool.name }
     var display: String { tool.display }
+    var shortDisplay: String { tool.shortDisplay }
 }
 
 enum SupportedRunners {
@@ -90,7 +96,7 @@ enum SupportedRunners {
             build.tools.enumerated().map { index, tool in
                 let name = build.id == holder && index == 0 ? legacyToolName : tool.name
                 return InstalledTool(
-                    tool: CompatTool(name: name, flavor: tool.flavor, display: tool.display), build: build.id
+                    tool: CompatTool(name: name, flavor: tool.flavor, display: tool.display, short: tool.short), build: build.id
                 )
             }
         }
@@ -134,7 +140,7 @@ enum SupportedRunners {
                 .i386Windows: "25bfde1f50ee96485763968ef10b9d9ad35e38214232f17ebdc009b098af44a0",
             ],
             tools: [
-                CompatTool(name: "notproton-preview", flavor: .rosetta, display: "CrossOver Preview (Rosetta-only version)"),
+                CompatTool(name: "notproton-preview", flavor: .rosetta, display: "CrossOver Preview - X86 Build (Rosetta)", short: "x86 Preview (Rosetta)"),
             ]
         ),
         RunnerBuild(
@@ -153,8 +159,8 @@ enum SupportedRunners {
                 .aarch64Windows: "f40810193a5ef2520774288f354a8604f5ba91828315f643b3ee6688b873dc3f",
             ],
             tools: [
-                CompatTool(name: "notproton-fex", flavor: .fex, display: "CrossOver Preview (FEX)"),
-                CompatTool(name: "notproton-fex-rosetta", flavor: .rosetta, display: "CrossOver Preview (Rosetta)"),
+                CompatTool(name: "notproton-fex", flavor: .fex, display: "CrossOver Preview - ARM64 Build (FEX)", short: "ARM64 Preview (FEX)"),
+                CompatTool(name: "notproton-fex-rosetta", flavor: .rosetta, display: "CrossOver Preview - ARM64 Build (Rosetta)", short: "ARM64 Preview (Rosetta)"),
             ]
         ),
     ]

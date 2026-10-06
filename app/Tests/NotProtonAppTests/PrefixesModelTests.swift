@@ -128,6 +128,38 @@ struct PrefixesModelTests {
         #expect(model.lastTool(try prefix("447700")) == nil)
     }
 
+    @Test("The Prefixes table shows the short name of the tool that runs each prefix")
+    func showsShortToolName() async throws {
+        let (dir, library) = try makeLibrary(appIDs: ["1574480", "253750"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let build = try #require(SupportedRunners.all.first { $0.tools.count == 2 })
+        let tools = build.tools.map { InstalledTool(tool: $0, build: build.id) }
+        let named = [
+            ("1574480", "CrossOver Preview - ARM64 Build (FEX)", UInt16(0xAA64)),
+            ("253750", "CrossOver Preview - ARM64 Build (Rosetta)", UInt16(0x8664)),
+        ]
+        for (appID, old, machine) in named {
+            let root = library.compatdata.appending(path: appID)
+            try write("\(build.id)\n\(old)\n", to: root.appending(path: PrefixTools.buildRecordName))
+            var bytes = [UInt8](repeating: 0, count: 0x40)
+            bytes[0x3c] = 0x40
+            bytes += [0x50, 0x45, 0x00, 0x00, UInt8(machine & 0xff), UInt8(machine >> 8)]
+            try FileManager.default.createDirectory(
+                at: root.appending(path: "pfx/drive_c/windows/system32"), withIntermediateDirectories: true)
+            try Data(bytes).write(to: root.appending(path: "pfx/drive_c/windows/system32/ntdll.dll"))
+        }
+
+        let model = PrefixesModel(libraries: { [library] }, installedTools: { tools })
+        await model.load()
+
+        func shown(_ appID: String) throws -> String? {
+            model.lastTool(try #require(model.prefixes.first { $0.appID == appID }))
+        }
+        #expect(try shown("1574480") == "ARM64 Preview (FEX)")
+        #expect(try shown("253750") == "ARM64 Preview (Rosetta)")
+    }
+
     @Test("A load lists the prefixes and measures each one")
     func loadsAndMeasures() async throws {
         let (dir, library) = try makeLibrary(appIDs: ["1574480", "1649240"])

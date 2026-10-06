@@ -343,8 +343,6 @@ struct StatusView: View {
             dangerSection
         }
         .formStyle(.grouped)
-        .frame(maxWidth: 680)
-        .frame(maxWidth: .infinity)
     }
 
     private var dangerSection: some View {
@@ -577,7 +575,7 @@ struct StatusView: View {
         var lines: [String] = []
         if row.copy == .ready || row.copy == .unpatched {
             let names = tools.filter { $0.build == row.buildID }.map(\.display)
-            if !names.isEmpty { lines.append(names.joined(separator: ", ")) }
+            lines.append(contentsOf: names)
         }
         if row.copy == .none, row.licensed == false { lines.append("Open CrossOver to activate it.") }
         if let install = row.install {
@@ -657,8 +655,7 @@ struct StatusView: View {
         if flavors.count > 1 {
             lines = flavors.compactMap { flavor in
                 guard let bytes = templates[flavor], bytes > 0 else { return nil }
-                let name = flavor == .fex ? "FEX" : "Rosetta"
-                return "\(name) templates \(bytes.formatted(.byteCount(style: .file)))"
+                return "\(flavor.name) templates \(bytes.formatted(.byteCount(style: .file)))"
             }
         } else {
             let bytes = templates.values.reduce(0, +)

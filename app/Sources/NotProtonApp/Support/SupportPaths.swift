@@ -55,12 +55,11 @@ enum SupportPaths {
     }
 
     static func prefixTemplates(forBuild build: String, in library: SteamLibrary) -> [URL] {
-        [.rosetta, .fex].map { prefixTemplate(forBuild: build, flavor: $0, in: library) }
+        CompatTool.Flavor.allCases.map { prefixTemplate(forBuild: build, flavor: $0, in: library) }
     }
 
     static func prefixTemplate(forBuild build: String, flavor: CompatTool.Flavor, in library: SteamLibrary) -> URL {
-        let unix = flavor == .fex ? "aarch64-unix" : "x86_64-unix"
-        return library.compatdata.appending(path: prefixTemplateFolder).appending(path: "crossover-\(build)-\(unix)")
+        library.compatdata.appending(path: prefixTemplateFolder).appending(path: "crossover-\(build)-\(flavor.unixDir)")
     }
 
     static let prefixTemplateFolder = "notproton-template"

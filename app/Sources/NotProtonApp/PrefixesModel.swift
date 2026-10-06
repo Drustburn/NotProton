@@ -22,7 +22,10 @@ final class PrefixesModel {
         stale.contains(prefix.id)
     }
 
+    private(set) var currentTools: [String: InstalledTool] = [:]
+
     func lastTool(_ prefix: WinePrefix) -> String? {
+        if let tool = currentTools[prefix.id] { return tool.shortDisplay }
         guard let record = records[prefix.id] else { return nil }
         return record.display ?? SupportedRunners.displayVersion(forID: record.build)
     }
@@ -92,18 +95,23 @@ final class PrefixesModel {
         let found = await Task.detached { PrefixStore.all(libraries: roots) }.value
         guard run == loadGeneration else { return }
         prefixes = found
-        usage = [:]
+        usage = usage.filter { id, _ in found.contains { $0.id == id } }
         let listTools = installedTools
-        (tools, records, stale) = await Task.detached {
+        (tools, records, stale, currentTools) = await Task.detached {
             let tools = listTools()
             var records: [String: PrefixBuildRecord] = [:]
             var stale = Set<String>()
+            var current: [String: InstalledTool] = [:]
             for prefix in found {
                 guard let record = PrefixTools.lastBuild(of: prefix) else { continue }
                 records[prefix.id] = record
-                if PrefixTools.tool(for: prefix, among: tools) == nil { stale.insert(prefix.id) }
+                if let tool = PrefixTools.tool(for: prefix, among: tools) {
+                    current[prefix.id] = tool
+                } else {
+                    stale.insert(prefix.id)
+                }
             }
-            return (tools, records, stale)
+            return (tools, records, stale, current)
         }.value
         guard run == loadGeneration else { return }
         selection = selection.filter { id in found.contains { $0.id == id } }

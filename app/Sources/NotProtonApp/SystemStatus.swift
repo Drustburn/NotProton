@@ -510,7 +510,7 @@ final class SystemStatus {
                     var info = stat()
                     guard lstat(folder.path(percentEncoded: false), &info) == 0,
                         info.st_mode & S_IFMT == S_IFDIR else { return }
-                    for flavor in [CompatTool.Flavor.rosetta, .fex] {
+                    for flavor in CompatTool.Flavor.allCases {
                         let template = SupportPaths.prefixTemplate(forBuild: build, flavor: flavor, in: library)
                         totals[flavor, default: 0] += PrefixStore.directoryBytes(template, metric: .allocated)
                     }
