@@ -6,6 +6,10 @@ SRC="${1:-$(dirname "$0")/../feats/compat_run.sh}"
 
 body=$(sed -n '/^import_prefix_settings() {$/,/^}$/p' "$SRC")
 [ -n "$body" ] || { echo "FAIL: import_prefix_settings not found in $SRC"; exit 1; }
+wrapper=$(sed -n '/^without_lock_fds() {$/,/^}$/p' "$SRC")
+[ -n "$wrapper" ] || { echo "FAIL: without_lock_fds not found in $SRC"; exit 1; }
+body="$wrapper
+$body"
 
 work=$(mktemp -d)
 trap 'chmod -R u+w "$work"; rm -rf "$work"' EXIT

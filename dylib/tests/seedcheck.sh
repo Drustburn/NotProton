@@ -4,9 +4,19 @@ SRC="${1:-$(dirname "$0")/../feats/compat_run.sh}"
 work=$(mktemp -d "${TMPDIR:-/tmp}/np-seedcheck.XXXXXX")
 test "$(stat -f %d "$work")" = "$(stat -f %d "${TMPDIR:-/tmp}")"
 trap 'chmod -R u+rwX "$work"; rm -rf "$work"' EXIT
-functions=$(awk '/^merge_user_dir\(\) \{/{take=1} /^import_prefix_settings\(\) \{/{take=0} take' "$SRC")
+cut_block() {
+  from="$1" to="$2" keep="$3" awk '
+    BEGIN { from = ENVIRON["from"]; to = ENVIRON["to"]; keep = ENVIRON["keep"] }
+    !on && $0 ~ from { on = 1 }
+    on && $0 ~ to { if (keep) print; found = 1; exit }
+    on { print }
+    END { exit !found }' "$SRC" || { echo "FAIL: no block from /$1/ to /$2/ in $SRC" >&2; exit 1; }
+}
+functions=$(cut_block '^merge_user_dir\(\) \{' '^import_prefix_settings\(\) \{' "")
 functions="$functions
-$(awk '/^runner_id=""/{take=1} /^if \[ -n "\$STEAM_COMPAT_DATA_PATH" \]; then/{take=0} take' "$SRC")"
+$(cut_block '^runner_id=""' '^if \[ -n ".STEAM_COMPAT_DATA_PATH" \]; then' "")"
+functions="$functions
+$(cut_block '^without_lock_fds\(\) \{' '^\}' 1)"
 np_build=fixture
 export np_build CX_ROOT CX_HOME wine_unix np_tool_dir WINELOADER WINESERVER
 export STEAM_COMPAT_DATA_PATH WINEPREFIX template_dir log seed_scratch seed_building
@@ -200,14 +210,38 @@ check test "$(printf '%s\n' "$isolated" | grep -Ec '^(WINEDLLOVERRIDES|WINEARCH|
 
 fixture
 prepare_prefix_directory
-check test "$(env functions="$functions" /bin/sh -c "
-  exec 8>&- 9>&-
-  eval \"\$functions\"
-  prepare_prefix_directory && echo unlocked || echo locked
-")" = locked
+probe_lock() {
+  env functions="$functions" /bin/sh -c "
+    exec 8>&- 9>&-
+    eval \"\$functions\"
+    prepare_prefix_directory && echo unlocked || echo locked
+  "
+}
+check test "$(probe_lock)" = locked
 exec 8>&-
 check prepare_prefix_directory
 exec 8>&-
+
+cat > "$work/daemonize" <<'STUB'
+#!/bin/sh
+sleep 30 &
+echo "$!" > "$1"
+STUB
+chmod +x "$work/daemonize"
+
+fixture
+prepare_prefix_directory
+"$work/daemonize" "$case_root/leaked.pid"
+exec 8>&-
+check test "$(probe_lock)" = locked
+kill "$(cat "$case_root/leaked.pid")" 2>/dev/null || true
+
+fixture
+prepare_prefix_directory
+without_lock_fds "$work/daemonize" "$case_root/held.pid"
+exec 8>&-
+check test "$(probe_lock)" = unlocked
+kill "$(cat "$case_root/held.pid")" 2>/dev/null || true
 
 fixture
 mkdir -p "$STEAM_COMPAT_DATA_PATH/pfx.replaced.123"

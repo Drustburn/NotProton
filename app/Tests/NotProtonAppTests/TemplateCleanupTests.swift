@@ -124,7 +124,7 @@ struct TemplateCleanupTests {
     }
 
     @MainActor
-    @Test("Refresh retries mounted libraries with no runners and clears the cleanup report")
+    @Test("Refresh skips a busy template lock without a report and cleans up once it is free")
     func refreshRetriesWithoutRunners() async throws {
         let layout = try Layout()
         defer { try? FileManager.default.removeItem(at: layout.root) }
@@ -135,7 +135,7 @@ struct TemplateCleanupTests {
         let status = SystemStatus()
 
         await status.refreshRunnerStorage(runners: layout.runners, libraries: [layout.library])
-        #expect(status.templateCleanupFailure?.contains(layout.library.compatdata.path) == true)
+        #expect(status.templateCleanupFailure == nil)
         #expect(FileManager.default.fileExists(atPath: layout.template.path))
 
         try #require(flock(fd, LOCK_UN) == 0)

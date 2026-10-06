@@ -80,11 +80,16 @@ enum RunnerInstaller {
 
     // Also catches templates left on a drive that was not present (unplugged or unmounted)
     // at the time the deployed copy of CrossOver was removed.
-    static func removeStalePrefixTemplates(runners: URL, libraries: [SteamLibrary]) -> [StepFailure] {
-        removePrefixTemplates(keeping: Set(RunnerStore.clonedBuilds(in: runners)), libraries: libraries)
+    static func removeStalePrefixTemplates(
+        runners: URL, libraries: [SteamLibrary], reportBusy: Bool = true
+    ) -> [StepFailure] {
+        removePrefixTemplates(
+            keeping: Set(RunnerStore.clonedBuilds(in: runners)), libraries: libraries, reportBusy: reportBusy)
     }
 
-    static func removePrefixTemplates(keeping builds: Set<String>, libraries: [SteamLibrary]) -> [StepFailure] {
+    static func removePrefixTemplates(
+        keeping builds: Set<String>, libraries: [SteamLibrary], reportBusy: Bool = true
+    ) -> [StepFailure] {
         var failures: [StepFailure] = []
         for library in libraries {
             let kept = Set(builds.flatMap {
@@ -109,7 +114,10 @@ enum RunnerInstaller {
                 var lockInfo = stat()
                 guard fstat(lock, &lockInfo) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
                 guard lockInfo.st_mode & S_IFMT == S_IFREG else { throw POSIXError(.EINVAL) }
-                guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+                guard flock(lock, LOCK_EX | LOCK_NB) == 0 else {
+                    if errno == EWOULDBLOCK && !reportBusy { continue }
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
 
                 let root = openat(parent, SupportPaths.prefixTemplateFolder, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
                 guard root >= 0 else {

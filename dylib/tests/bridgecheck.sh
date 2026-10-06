@@ -4,11 +4,13 @@ set -e
 SRC="${1:-$(dirname "$0")/../feats/compat_run.sh}"
 [ -f "$SRC" ] || { echo "bridgecheck: $SRC not present, skipped"; exit 0; }
 
-block=$(sed -n '/^bridge_files="steamclient64/,/^  verify_runner$/p' "$SRC" | sed '$d')
+block=$(sed -n '/^bridge_files="steamclient64/,/^  verify_runner$/p' "$SRC")
 case "$block" in
-  *'bridge_matches='*) ;;
+  *'bridge_matches='*'
+  verify_runner') ;;
   *) echo "FAIL: the bridge staging block not found in $SRC"; exit 1 ;;
 esac
+block=$(printf '%s\n' "$block" | sed '$d')
 body="$block
 fi"
 

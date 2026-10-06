@@ -65,6 +65,12 @@ if [ "$np_flavor" = rosetta ] || [ ! -x "$WINELOADER" ] || [ ! -x "$WINESERVER" 
   [ -x "$WINESERVER" ] || WINESERVER="$CX_ROOT/CrossOver-Hosted Application/wineserver-x86"
 fi
 export WINELOADER WINESERVER
+
+# Keeps Wine from inheriting the prefix and template locks (fd 8 and 9).
+without_lock_fds() {
+  "$@" 8>&- 9>&-
+}
+
 # If two WINEDLLPATH directories have the same DLL, Wine uses the one listed first.
 export WINEDLLPATH="$CX_ROOT/lib/wine/x86_64-windows:$wine_unix${WINEDLLPATH:+:$WINEDLLPATH}"
 export PATH="$CX_ROOT/bin:$PATH"
@@ -400,10 +406,10 @@ import_prefix_settings() {
     [ -z "$settings_file" ] || rm -f "$settings_file"
     echo "=== could not write the prefix settings, launching without them ===" >> "$log" 2>&1 || true
     # the bridge staging still needs a built prefix
-    "$WINELOADER" wineboot --init >> "$log" 2>&1 || true
+    without_lock_fds "$WINELOADER" wineboot --init >> "$log" 2>&1 || true
     return 0
   fi
-  "$WINELOADER" reg import "C:\\${settings_file##*/}" >> "$log" 2>&1 \
+  without_lock_fds "$WINELOADER" reg import "C:\\${settings_file##*/}" >> "$log" 2>&1 \
     && import_status=0 || import_status=$?
   rm -f "$settings_file"
   [ "$import_status" -eq 0 ] \
@@ -426,7 +432,8 @@ runner_id=""
 in_template_env() {
   prefix="$1"
   shift
-  env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-}" TMPDIR="${TMPDIR:-/tmp}" \
+  without_lock_fds \
+    env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-}" TMPDIR="${TMPDIR:-/tmp}" \
     LANG="${LANG:-}" LC_ALL="${LC_ALL:-}" \
     PATH="$CX_ROOT/bin:/usr/bin:/bin:/usr/sbin:/sbin" CX_ROOT="$CX_ROOT" CX_HOME="$CX_HOME" \
     WINEDLLPATH="$CX_ROOT/lib/wine/x86_64-windows:$wine_unix" \
@@ -704,6 +711,7 @@ prepare_prefix_directory() {
   exec 8>> "$prefix_lock"
   if ! /usr/bin/lockf -s -t 0 8; then
     echo "=== another launch is preparing this prefix ===" >> "$log" 2>&1 || true
+    /usr/sbin/lsof -- "$prefix_lock" >> "$log" 2>&1 || true
     return 1
   fi
   for interrupted in "$STEAM_COMPAT_DATA_PATH"/pfx.replaced.*; do
@@ -717,6 +725,7 @@ prepare_prefix_directory() {
 
 if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
+  stage_step="prefix lock"
   prepare_prefix_directory
   msync_from=environment
   if [ -z "$WINEMSYNC" ] && [ -r "$STEAM_COMPAT_DATA_PATH/notproton-msync" ]; then
@@ -734,7 +743,7 @@ if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   refuse_foreign_prefix
   claim_prefix
   echo "sync: WINEMSYNC=$WINEMSYNC from $msync_from" >> "$log" 2>&1 || true
-  "$WINESERVER" -k >> "$log" 2>&1 || true
+  without_lock_fds "$WINESERVER" -k >> "$log" 2>&1 || true
   stage_step="prefix seed"
   seed_prefix_from_template
   stage_step="profile layout"

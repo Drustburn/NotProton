@@ -510,7 +510,7 @@ final class SystemStatus {
         let known = runnerSizes
         let measured = await Task.detached(priority: .utility) {
             let failures = cleanTemplates
-                ? RunnerInstaller.removeStalePrefixTemplates(runners: runners, libraries: libraries) : []
+                ? RunnerInstaller.removeStalePrefixTemplates(runners: runners, libraries: libraries, reportBusy: false) : []
             var sizes: [String: Int64] = [:]
             var templates: [String: [CompatTool.Flavor: Int64]] = [:]
             for build in RunnerStore.clonedBuilds(in: runners) {
