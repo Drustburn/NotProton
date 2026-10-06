@@ -6,7 +6,7 @@ SRC="${1:-$(dirname "$0")/../feats/compat_run.sh}"
 
 block=$(sed -n '/^bridge_files="steamclient64/,/^  verify_runner$/p' "$SRC" | sed '$d')
 case "$block" in
-  *'stat -f'*) ;;
+  *'bridge_matches='*) ;;
   *) echo "FAIL: the bridge staging block not found in $SRC"; exit 1 ;;
 esac
 body="$block
@@ -51,6 +51,15 @@ echo "== a second launch copies nothing"
 stage
 is "the launch goes on" reached "$(cat "$work/out")"
 logged "the copy is recognised" "=== bridge already staged ==="
+
+echo "== changed bytes with the same size and timestamp"
+cp -p "$work/bridge/steam.exe" "$work/stamp"
+printf 'edited steam.exe\n' > "$work/bridge/steam.exe"
+touch -r "$work/stamp" "$work/bridge/steam.exe"
+is "the metadata still matches" "$(stat -f '%z %m' "$steam/steam.exe")" "$(stat -f '%z %m' "$work/bridge/steam.exe")"
+stage
+unlogged "matching metadata does not hide changed contents" "=== bridge already staged ==="
+is "the prefix receives the changed bytes" 6 "$(staged)"
 
 echo "== a DLL the bridge no longer ships is pruned"
 printf 'old\n' > "$steam/old.dll"

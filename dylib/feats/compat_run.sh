@@ -820,11 +820,14 @@ bridge_files="$bridge_files lsteamclient.dll steam.exe"
 if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   stage_step="bridge staging"
   mkdir -p "$prefix_steam"
-  # shellcheck disable=SC2086 # the list is ours and has no spaces
-  src_stamp=$(cd "$bridge_src" && stat -f '%z %m' $bridge_files 2>/dev/null) || true
-  # shellcheck disable=SC2086
-  dst_stamp=$(cd "$prefix_steam" && stat -f '%z %m' $bridge_files 2>/dev/null) || true
-  if [ -n "$src_stamp" ] && [ "$src_stamp" = "$dst_stamp" ]; then
+  bridge_matches=1
+  for f in $bridge_files; do
+    if ! cmp -s "$bridge_src/$f" "$prefix_steam/$f"; then
+      bridge_matches=0
+      break
+    fi
+  done
+  if [ "$bridge_matches" -eq 1 ]; then
     echo "=== bridge already staged ===" >> "$log" 2>&1 || true
   else
     for f in $bridge_files; do
@@ -833,6 +836,7 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
         echo "=== bridge missing $f ===" >> "$log" 2>&1 || true
         continue
       fi
+      cmp -s "$src" "$prefix_steam/$f" && continue
       cp -fp "$src" "$prefix_steam/$f" || \
         echo "=== failed to stage $f ===" >> "$log" 2>&1
     done
