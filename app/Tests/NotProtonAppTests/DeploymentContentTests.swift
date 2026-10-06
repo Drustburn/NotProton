@@ -155,6 +155,25 @@ struct DeploymentContentTests {
         #expect(status.canInstall)
     }
 
+    @MainActor
+    @Test("A newer installed build also blocks removing a build")
+    func newerInstallBlocksRemoval() {
+        let status = SystemStatus()
+        let payload = PayloadState(expected: 0, present: 0, missing: [], overlayShimPresent: true,
+                                   iconmakerPresent: true, appinfoPresent: true, signatureDatabase: "fixture",
+                                   legacyCompatPresent: 0, legacyCompatExpected: 0, manifestProblem: nil)
+        status.snapshot = StatusSnapshot(steam: .notInstalled, steamRunning: false, updateBlocked: false,
+                                         crossOver: [], runner: .none, payload: payload,
+                                         installContent: .newerInstalled)
+        status.requestBuildRemoval("crossover-26.0")
+        #expect(status.pendingRemoval == nil)
+        #expect(status.pendingConfirmation == nil)
+        status.snapshot?.installContent = .unrecorded(["notproton.dylib"])
+        status.requestBuildRemoval("crossover-26.0")
+        #expect(status.pendingRemoval == "crossover-26.0")
+        #expect(status.pendingConfirmation == .removeBuild)
+    }
+
     @Test("Installation locking excludes another caller and releases without a lock file")
     func installationLock() throws {
         let root = try scratchDirectory("content-lock")

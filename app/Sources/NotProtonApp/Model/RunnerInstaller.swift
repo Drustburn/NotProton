@@ -67,15 +67,34 @@ enum RunnerInstaller {
             )
         }
 
-        try WriteRefused.catching(path) { try FileManager.default.removeItem(at: target) }
-        let changed = try CompatToolList.sync(
-            runners: runners, bridge: bridge, file: toolList, compatTools: compatTools
-        )
+        let fm = FileManager.default
+        let trash = target.deletingLastPathComponent().appending(path: ".\(target.lastPathComponent).removing")
+        removeLeftoverRemovals(runners: runners)
+        try WriteRefused.catching(path) { try fm.moveItem(at: target, to: trash) }
+        let changed: Bool
+        do {
+            changed = try CompatToolList.sync(
+                runners: runners, bridge: bridge, file: toolList, compatTools: compatTools
+            )
+        } catch {
+            try? fm.moveItem(at: trash, to: target)
+            throw error
+        }
+        try WriteRefused.catching(trash) { try fm.removeItem(at: trash) }
         let failures = removeStalePrefixTemplates(runners: runners, libraries: libraries)
         if !failures.isEmpty {
             throw StepFailure(step: removeStep, detail: failures.map(\.detail).joined(separator: "\n"))
         }
         return changed
+    }
+
+    static func removeLeftoverRemovals(runners: URL) {
+        let fm = FileManager.default
+        let entries = (try? fm.contentsOfDirectory(at: runners, includingPropertiesForKeys: nil)) ?? []
+        for entry in entries where entry.lastPathComponent.hasPrefix(".crossover-")
+            && entry.lastPathComponent.hasSuffix(".removing") {
+            try? fm.removeItem(at: entry)
+        }
     }
 
     // Also catches templates left on a drive that was not present (unplugged or unmounted)

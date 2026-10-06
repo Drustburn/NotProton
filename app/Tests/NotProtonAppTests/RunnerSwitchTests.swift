@@ -17,6 +17,8 @@ struct RunnerPrepareTests {
         licensed: false, detail: CrossOverLicense.notActivated, diagnostic: "test"
     )
 
+    private static let runScript = Data("#!/bin/sh\n".utf8)
+
     private final class Calls: @unchecked Sendable {
         var staged: [String] = []
         var patched: [String] = []
@@ -66,6 +68,11 @@ struct RunnerPrepareTests {
             bridge: runners.appending(path: "bridge"),
             toolList: runners.appending(path: "tools"),
             compatTools: runners.appending(path: "compatibilitytools.d"),
+            runScript: {
+                let script = runners.appending(path: "payload-run")
+                try Self.runScript.write(to: script)
+                return script
+            },
             license: { _ in license },
             verify: { _, _ in },
             stage: { build, _, bridge in
@@ -103,6 +110,36 @@ struct RunnerPrepareTests {
 
         let again = try prepare(Self.release, runners: runners, calls: calls)
         #expect(!again.toolsChanged)
+    }
+
+    @Test("Every listed tool gets a run script")
+    func writesMissingRunScripts() throws {
+        let runners = try makeRunners(cloning: [Self.release, Self.fex])
+        defer { try? FileManager.default.removeItem(at: runners) }
+
+        _ = try prepare(Self.release, runners: runners, calls: Calls())
+
+        let tools = CompatToolList.installed(runners: runners, file: runners.appending(path: "tools"))
+        #expect(tools.count > 1)
+        for tool in tools {
+            let run = runners.appending(path: "compatibilitytools.d/\(tool.name)/run")
+            #expect(try Data(contentsOf: run) == Self.runScript)
+            #expect(FileManager.default.isExecutableFile(atPath: run.path))
+        }
+    }
+
+    @Test("A tool's existing run script is left alone")
+    func keepsExistingRunScript() throws {
+        let runners = try makeRunners(cloning: [Self.release])
+        defer { try? FileManager.default.removeItem(at: runners) }
+        let tool = SupportedRunners.tools(for: [Self.release])[0].name
+        let run = runners.appending(path: "compatibilitytools.d/\(tool)/run")
+        let old = Data("#!/bin/sh\nexec runners/current\n".utf8)
+        try atomicReplace(run, with: old, step: "test")
+
+        _ = try prepare(Self.release, runners: runners, calls: Calls())
+
+        #expect(try Data(contentsOf: run) == old)
     }
 
     @Test("Preparing one build leaves another build's staged copies alone")
@@ -432,6 +469,55 @@ struct RunnerRemovalTests {
             libraries: libraries,
             running: { _ in running }
         )
+    }
+
+    @Test("Removing a build leaves nothing of it in the runners folder")
+    func removalLeavesNothing() throws {
+        let runners = try makeRunners(cloning: [Self.rosetta.id, Self.fex.id])
+        defer { try? FileManager.default.removeItem(at: runners) }
+        let fm = FileManager.default
+        let leftover = runners.appending(path: ".crossover-\(Self.rosetta.id).removing/CrossOver")
+        try fm.createDirectory(at: leftover, withIntermediateDirectories: true)
+
+        _ = try remove(Self.rosetta.id, runners: runners)
+
+        let left = try fm.contentsOfDirectory(atPath: runners.path(percentEncoded: false))
+            .filter { $0.contains(Self.rosetta.id) }
+        #expect(left.isEmpty)
+        #expect(RunnerStore.clonedBuilds(in: runners) == [Self.fex.id])
+    }
+
+    @Test("Removing a build also clears what an earlier failed removal of another build left")
+    func removalClearsOtherLeftovers() throws {
+        let runners = try makeRunners(cloning: [Self.rosetta.id])
+        defer { try? FileManager.default.removeItem(at: runners) }
+        let fm = FileManager.default
+        let leftover = runners.appending(path: ".crossover-\(Self.fex.id).removing/CrossOver")
+        try fm.createDirectory(at: leftover, withIntermediateDirectories: true)
+
+        _ = try remove(Self.rosetta.id, runners: runners)
+
+        #expect(try fm.contentsOfDirectory(atPath: runners.path(percentEncoded: false))
+            .filter { $0.hasSuffix(".removing") }.isEmpty)
+    }
+
+    @Test("A removal whose tool list cannot be written puts the build back")
+    func failedSyncRestoresBuild() throws {
+        let runners = try makeRunners(cloning: [Self.rosetta.id, Self.fex.id])
+        defer { try? FileManager.default.removeItem(at: runners) }
+        let fm = FileManager.default
+        try fm.createDirectory(at: runners.appending(path: "tools/blocked"), withIntermediateDirectories: true)
+        let staged = runners.appending(path: "bridge/wine/\(Self.rosetta.id)/x86_64-windows/ntdll.dll")
+        try fm.createDirectory(at: staged.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("patched".utf8).write(to: staged)
+
+        #expect(throws: (any Error).self) { try remove(Self.rosetta.id, runners: runners) }
+        #expect(fm.fileExists(atPath: staged.path(percentEncoded: false)))
+
+        #expect(RunnerStore.clonedBuilds(in: runners) == [Self.fex.id, Self.rosetta.id].sorted())
+        #expect(RunnerInstaller.hasClone(forBuild: Self.rosetta.id, runners: runners))
+        #expect(try fm.contentsOfDirectory(atPath: runners.path(percentEncoded: false))
+            .filter { $0.hasSuffix(".removing") }.isEmpty)
     }
 
     @Test("Removing a build deletes its prefix templates in every library and keeps the others")

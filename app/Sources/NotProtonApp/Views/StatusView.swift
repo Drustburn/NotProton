@@ -672,7 +672,7 @@ struct StatusView: View {
             label: label,
             role: .destructive,
             help: "Delete NotProton's copy of this build.",
-            isEnabled: status.isIdle
+            isEnabled: status.canInstall
         ) {
             status.requestBuildRemoval(build)
         }

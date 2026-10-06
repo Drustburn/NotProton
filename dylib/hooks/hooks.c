@@ -60,10 +60,7 @@ static int np_apply_entry(np_resolve_result_t *resolved, const char *group,
     uintptr_t addr = e->address ? e->address
                    : e->signature ? np_lookup_address(resolved, e->signature) : 0;
     if (!addr) {
-        if (e->tolerate_missing)
-            NP_DBG("[%s] %s: unresolved (optional)", group, e->label);
-        else
-            NP_WARN("[%s] %s: unresolved, cannot install", group, e->label);
+        NP_WARN("[%s] %s: unresolved, cannot install", group, e->label);
         return 0;
     }
 

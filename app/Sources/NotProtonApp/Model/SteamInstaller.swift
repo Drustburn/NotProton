@@ -35,6 +35,7 @@ enum InstallPhase: Sendable {
 struct InstallOutcome: Sendable {
     let stoppedClient: Bool
     let version: String
+    let build: DeploymentContent.Build
     let signatureDatabases: Int
     let backedUpPlist: Bool
     let bridgeStaged: Int
@@ -63,7 +64,6 @@ enum SteamInstaller {
         deployedVersion: URL = SupportPaths.deployedVersion,
         backups: URL = SupportPaths.backups,
         compatTools: URL = SupportPaths.Steam.compatTools,
-        recordBuild: Bool = true,
         holdingInstallationLock: Bool = false,
         runnerIsRunning: @Sendable (URL) -> Bool = { RunnerInstaller.isRunning(from: $0) },
         verifyRunner: (RunnerBuild, URL) throws -> Void = RunnerInstaller.verifyClone,
@@ -146,11 +146,7 @@ enum SteamInstaller {
         report(.installingSignatures)
         report(.installingOverlayShim)
         for file in files where file.destination != dylib {
-            if try file.matches() { continue }
-            try install(file.source, at: file.destination)
-            if file.executable {
-                try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.destination.path(percentEncoded: false))
-            }
+            try installIfChanged(file)
         }
 
         var backedUp = false
@@ -189,19 +185,38 @@ enum SteamInstaller {
         guard remaining.isEmpty else {
             throw StepFailure(step: step, detail: "These files did not update: \(remaining.joined(separator: ", ")).")
         }
-        if recordBuild {
-            try write(version, to: deployedVersion)
-            try atomicReplace(record, with: JSONEncoder().encode(build), step: step)
-        }
 
         report(.finished)
         return InstallOutcome(
             stoppedClient: stopped,
             version: version,
+            build: build,
             signatureDatabases: payload.signatures.count,
             backedUpPlist: backedUp,
             bridgeStaged: bridgeResult.staged.count
         )
+    }
+
+    static func finish(
+        _ outcome: InstallOutcome,
+        deployedVersion: URL = SupportPaths.deployedVersion,
+        isCurrent: (String) -> Bool = { DeploymentContent.current(version: $0) == .current }
+    ) throws {
+        guard isCurrent(outcome.version) else {
+            throw StepFailure(step: step,
+                              detail: "Installed content could not be verified. Refresh the Status view for the files that still need attention.")
+        }
+        try write(outcome.version, to: deployedVersion)
+        try atomicReplace(DeploymentContent.record(beside: deployedVersion),
+                          with: JSONEncoder().encode(outcome.build), step: step)
+    }
+
+    static func installIfChanged(_ file: DeploymentContent.File) throws {
+        if try file.matches() { return }
+        try install(file.source, at: file.destination)
+        if file.executable {
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.destination.path(percentEncoded: false))
+        }
     }
 
 

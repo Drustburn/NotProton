@@ -49,6 +49,7 @@ enum RunnerSetup {
         bridge: URL = SupportPaths.bridge,
         toolList: URL = SupportPaths.toolList,
         compatTools: URL = SupportPaths.Steam.compatTools,
+        runScript: () throws -> URL = { try InstallPayload.locate().run },
         license: (URL) -> CrossOverLicense.Status = { CrossOverLicense.check(crossOverRoot: $0) },
         verify: (RunnerBuild, URL) throws -> Void = RunnerInstaller.verifyClone,
         stage: (RunnerBuild, URL, URL) throws -> [WineArch] = {
@@ -81,6 +82,12 @@ enum RunnerSetup {
         outcome.toolsChanged = try CompatToolList.sync(
             runners: runners, bridge: bridge, file: toolList, compatTools: compatTools
         )
+        for tool in CompatToolList.installed(runners: runners, file: toolList) {
+            let run = compatTools.appending(path: "\(tool.name)/run")
+            if FileManager.default.fileExists(atPath: run.path(percentEncoded: false)) { continue }
+            try SteamInstaller.installIfChanged(DeploymentContent.File(
+                source: try runScript(), destination: run, name: "\(tool.name)/run", executable: true))
+        }
 
         report(.finished)
         return outcome

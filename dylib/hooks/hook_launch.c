@@ -131,7 +131,6 @@ static np_patch_entry_t g_hooks[] = {
         .signature  = "LaunchBuilder::SteamVRSupportCheck",
         .entry      = (void *)np_hook_vr_support,
         .trampoline = &orig_vr_support,
-        .tolerate_missing = 1,
     },
 };
 

@@ -226,7 +226,7 @@ final class SystemStatus {
     private(set) var pendingRemoval: String?
 
     func requestBuildRemoval(_ build: String) {
-        guard isIdle else { return }
+        guard canInstall else { return }
         pendingRemoval = build
         pendingConfirmation = .removeBuild
     }
@@ -241,6 +241,7 @@ final class SystemStatus {
         await perform(from: RunnerInstaller.removeStep) { _ in
             let lock = try DeploymentContent.acquireInstallationLock(for: SupportPaths.Steam.app)
             defer { close(lock) }
+            try await requireUnblockedContent()
             let changed = try await Task.detached(priority: .userInitiated) {
                 try RunnerInstaller.removeClone(forBuild: build)
             }.value
@@ -363,15 +364,7 @@ final class SystemStatus {
         "The compatibility tool was not set up because CrossOver is not activated."
 
     private func requireInstallableContent() async throws {
-        let version = AppVersion.bundled
-        let content = await Task.detached(priority: .utility) {
-            DeploymentContent.current(version: version)
-        }.value
-        snapshot?.installContent = content
-        guard !content.blocksInstallation else {
-            throw StepFailure(step: SteamInstaller.step,
-                              detail: "Installation is blocked. Refresh Status and use the NotProton app that installed this build.")
-        }
+        try await requireUnblockedContent()
         let running = await Task.detached(priority: .utility) {
             RunnerStore.clonedBuilds().contains {
                 RunnerInstaller.isRunning(from: SupportPaths.runnerRoot(forBuild: $0))
@@ -382,13 +375,24 @@ final class SystemStatus {
         }
     }
 
+    private func requireUnblockedContent() async throws {
+        let version = AppVersion.bundled
+        let content = await Task.detached(priority: .utility) {
+            DeploymentContent.current(version: version)
+        }.value
+        snapshot?.installContent = content
+        guard !content.blocksInstallation else {
+            throw StepFailure(step: SteamInstaller.step,
+                              detail: "Installation is blocked. Refresh Status and use the NotProton app that installed this build.")
+        }
+    }
+
     func installIntoSteam() async {
         await perform(from: InstallPhase.checkingPayload.label) { progress in
             let lock = try DeploymentContent.acquireInstallationLock(for: SupportPaths.Steam.app)
             defer { close(lock) }
             let result = try await Task.detached(priority: .userInitiated) {
-                try SteamInstaller.run(recordBuild: false, holdingInstallationLock: true,
-                                       report: { progress($0.label) })
+                try SteamInstaller.run(holdingInstallationLock: true, report: { progress($0.label) })
             }.value
 
             var parts = ["NotProton successfully installed."]
@@ -423,25 +427,7 @@ final class SystemStatus {
             }
 
             try await Task.detached(priority: .userInitiated) {
-                let payload = try InstallPayload.locate()
-                for tool in CompatToolList.installed() {
-                    let destination = SupportPaths.Steam.compatTools.appending(path: "\(tool.name)/run")
-                    let file = DeploymentContent.File(source: payload.run, destination: destination, name: tool.name, executable: true)
-                    if try !file.matches() {
-                        try SteamInstaller.install(payload.run, at: destination)
-                        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path(percentEncoded: false))
-                    }
-                }
-                let verified = DeploymentContent.current(version: result.version)
-                guard verified == .current else {
-                    throw StepFailure(step: SteamInstaller.step,
-                                      detail: "Installed content could not be verified. Refresh the Status view for the files that still need attention.")
-                }
-                let build = DeploymentContent.Build(version: result.version, builtAt: payload.builtAt,
-                                                     dylibHashes: try MachOBuild.hashesIgnoringSignature(of: payload.dylib))
-                try SteamInstaller.write(result.version, to: SupportPaths.deployedVersion)
-                try atomicReplace(DeploymentContent.record(beside: SupportPaths.deployedVersion),
-                                  with: JSONEncoder().encode(build), step: SteamInstaller.step)
+                try SteamInstaller.finish(result)
             }.value
 
             return parts.joined(separator: " ")
@@ -509,6 +495,10 @@ final class SystemStatus {
     ) async {
         let known = runnerSizes
         let measured = await Task.detached(priority: .utility) {
+            if cleanTemplates, let lock = try? DeploymentContent.acquireInstallationLock(for: SupportPaths.Steam.app) {
+                RunnerInstaller.removeLeftoverRemovals(runners: runners)
+                close(lock)
+            }
             let failures = cleanTemplates
                 ? RunnerInstaller.removeStalePrefixTemplates(runners: runners, libraries: libraries, reportBusy: false) : []
             var sizes: [String: Int64] = [:]

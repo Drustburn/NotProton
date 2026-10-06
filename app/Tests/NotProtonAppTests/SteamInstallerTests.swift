@@ -94,7 +94,7 @@ struct SteamInstallerTests {
         recordBuild: Bool = true,
         verifyRunner: (RunnerBuild, URL) throws -> Void = { _, _ in }
     ) throws -> InstallOutcome {
-        try SteamInstaller.run(
+        let outcome = try SteamInstaller.run(
             payload: fixture.payload,
             version: version,
             app: fixture.app,
@@ -106,13 +106,16 @@ struct SteamInstallerTests {
             deployedVersion: fixture.deployedVersion,
             backups: fixture.backups,
             compatTools: fixture.work.appending(path: "compatibilitytools.d"),
-            recordBuild: recordBuild,
             runnerIsRunning: { _ in running },
             verifyRunner: verifyRunner,
             patchRunner: { _, _, _ in },
             stopClient: { _, onStopping in if stopped { onStopping() }; return stopped },
             register: { calls.register($0) }
         )
+        if recordBuild {
+            try SteamInstaller.finish(outcome, deployedVersion: fixture.deployedVersion, isCurrent: { _ in true })
+        }
+        return outcome
     }
 
     @Test("A full install puts every artifact in place and declares the insert")
@@ -574,12 +577,40 @@ struct SteamInstallerTests {
         #expect(!FileManager.default.fileExists(atPath: fixture.deployedDylib.path))
     }
 
-    @Test("An install can defer its build record until remaining setup steps finish")
+    @Test("An install writes no build record until it is finished")
     func defersRecord() async throws {
         let work = try scratchDirectory("install-deferred")
         defer { try? FileManager.default.removeItem(at: work) }
         let fixture = try await self.fixture(into: work)
         _ = try install(fixture, recordBuild: false)
+        #expect(!FileManager.default.fileExists(atPath: DeploymentContent.record(beside: fixture.deployedVersion).path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.deployedVersion.path))
+    }
+
+    @Test("Finishing records the build")
+    func finishRecordsBuild() async throws {
+        let work = try scratchDirectory("install-finish")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        let outcome = try install(fixture, recordBuild: false)
+
+        try SteamInstaller.finish(outcome, deployedVersion: fixture.deployedVersion, isCurrent: { _ in true })
+
+        #expect(try DeploymentContent.readBuild(at: DeploymentContent.record(beside: fixture.deployedVersion)) == outcome.build)
+        #expect(try String(contentsOf: fixture.deployedVersion, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "9.9.9-test")
+    }
+
+    @Test("Finishing records nothing when the installed content is not current")
+    func finishRefusesUnverifiedContent() async throws {
+        let work = try scratchDirectory("install-unverified")
+        defer { try? FileManager.default.removeItem(at: work) }
+        let fixture = try await self.fixture(into: work)
+        let outcome = try install(fixture, recordBuild: false)
+
+        #expect(throws: StepFailure.self) {
+            try SteamInstaller.finish(outcome, deployedVersion: fixture.deployedVersion, isCurrent: { _ in false })
+        }
         #expect(!FileManager.default.fileExists(atPath: DeploymentContent.record(beside: fixture.deployedVersion).path))
         #expect(!FileManager.default.fileExists(atPath: fixture.deployedVersion.path))
     }

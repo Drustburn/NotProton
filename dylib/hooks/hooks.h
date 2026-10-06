@@ -23,7 +23,6 @@ typedef struct {
     void            *entry;
     void           **trampoline;
     np_patch_mode_t  mode;
-    int              tolerate_missing;   // when set, an unresolved signature only logs at debug
 } np_patch_entry_t;
 
 int               np_hooks_compat_count(void);

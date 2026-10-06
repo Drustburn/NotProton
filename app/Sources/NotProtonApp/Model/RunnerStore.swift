@@ -139,15 +139,16 @@ enum CompatToolList {
         compatTools: URL = SupportPaths.Steam.compatTools
     ) throws -> Bool {
         let (builds, listed, tools) = resolved(runners: runners, file: file)
-        prune(keeping: Set(builds.map(\.id)), runners: runners, bridge: bridge, compatTools: compatTools)
-
         let text = contents(tools)
-        if listed == text || (listed == nil && text.isEmpty) { return false }
-        try FileManager.default.createDirectory(
-            at: file.deletingLastPathComponent(), withIntermediateDirectories: true
-        )
-        try atomicReplace(file, with: Data(text.utf8), step: "Update compatibility tools")
-        return true
+        let changed = !(listed == text || (listed == nil && text.isEmpty))
+        if changed {
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try atomicReplace(file, with: Data(text.utf8), step: "Update compatibility tools")
+        }
+        prune(keeping: Set(builds.map(\.id)), runners: runners, bridge: bridge, compatTools: compatTools)
+        return changed
     }
 
     private static func prune(
