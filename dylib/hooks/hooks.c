@@ -41,6 +41,7 @@ typedef struct {
 static const np_hook_group_t np_groups[] = {
     { "compat", np_hooks_compat_count, np_hooks_compat_defs },
     { "webui",  np_hooks_webui_count,  np_hooks_webui_defs  },
+    { "launch", np_hooks_launch_count, np_hooks_launch_defs },
 };
 
 static const np_hook_group_t np_steamui_groups[] = {

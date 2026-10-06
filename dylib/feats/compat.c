@@ -15,6 +15,7 @@
 // the tool's name contains "proton" so without a match every AutoCloud rule silently
 // skips the app.
 #define TOOL_DIR_NAME "notproton"
+#define TOOL_RUN      "/run"
 
 #define COMPAT_MANAGER_ENABLED_OFF  0x7B0
 #define COMPAT_TOOL_STRIDE          0x130
@@ -30,7 +31,7 @@ static const char TOOL_MANIFEST[] =
     "\"manifest\"\n"
     "{\n"
     "  \"version\" \"2\"\n"
-    "  \"commandline\" \"/run %verb%\"\n"
+    "  \"commandline\" \"" TOOL_RUN " %verb%\"\n"
     "}\n";
 
 // Steam's compatibilitytools.d scanner registers a tool when this file is present
@@ -304,14 +305,21 @@ static tool_entry_t g_tools[TOOL_LIST_MAX];
 static int g_tool_count;
 static int g_tool_list_present;
 
+static int is_name_char(char c, const char *extra) {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+        return 1;
+    return c && strchr(extra, c);
+}
+
 static int is_token(const char *s, const char *extra) {
     if (!*s) return 0;
-    for (; *s; s++) {
-        if ((*s >= 'a' && *s <= 'z') || (*s >= 'A' && *s <= 'Z') || (*s >= '0' && *s <= '9'))
-            continue;
-        if (!strchr(extra, *s)) return 0;
-    }
+    for (; *s; s++)
+        if (!is_name_char(*s, extra)) return 0;
     return 1;
+}
+
+static int is_tool_name(const char *s) {
+    return s && strncmp(s, TOOL_DIR_NAME, strlen(TOOL_DIR_NAME)) == 0 && is_token(s, "._-");
 }
 
 static int is_display(const char *s) {
@@ -330,8 +338,7 @@ static int parse_tool_line(char *line, tool_entry_t *out) {
         field[n++] = tok;
     if (n != 4) return 0;
 
-    if (strncmp(field[0], TOOL_DIR_NAME, strlen(TOOL_DIR_NAME)) != 0
-        || !is_token(field[0], "._-") || !is_token(field[1], ".-")
+    if (!is_tool_name(field[0]) || !is_token(field[1], ".-")
         || (strcmp(field[2], "fex") != 0 && strcmp(field[2], "rosetta") != 0)
         || !is_display(field[3]))
         return 0;
@@ -566,8 +573,24 @@ const char *np_compat_tool_dir(void) {
     return dir;
 }
 
+int np_compat_runs_tool(const char *cmd) {
+    static const char lead[]    = "/compatibilitytools.d/" TOOL_DIR_NAME;
+    static const char run[]     = "'" TOOL_RUN " ";
+    static const char run_dot[] = "/.'" TOOL_RUN " ";
+    if (!cmd) return 0;
+
+    for (const char *at = strstr(cmd, lead); at; at = strstr(at + 1, lead)) {
+        const char *p = at + sizeof(lead) - 1;
+        while (is_name_char(*p, "._-"))
+            p++;
+        if (strncmp(p, run, sizeof(run) - 1) == 0 || strncmp(p, run_dot, sizeof(run_dot) - 1) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 const char *np_compat_tool_commandline(void) {
-    return "/run %verb%";
+    return TOOL_RUN " %verb%";
 }
 
 void np_compat_force_enable(void *compat_mgr) {
@@ -695,6 +718,12 @@ static void *g_manager;
 
 void *np_compat_manager(void) {
     return g_manager;
+}
+
+int np_compat_app_runs_tool(uint32_t appid) {
+    const uint8_t *tool = np_compat_tool_for_app(g_manager, appid);
+
+    return tool && is_tool_name(*(const char *const *)(tool + COMPAT_TOOL_NAME_OFF));
 }
 
 static void *find_tool(void *compat_mgr, const char *wanted) {

@@ -233,6 +233,30 @@ static void tool_list_cases(void) {
           && !g_tool_list_present, "a missing list keeps no tools and says so");
 }
 
+static void tool_launch_cases(void) {
+    static const char *tool[] = {
+        "'/tools/compatibilitytools.d/notproton/.'/run waitforexitandrun  '/g/game.exe'",
+        "A=1 '/tools/compatibilitytools.d/notproton-26.3/.'/run waitforexitandrun  '/g/game.exe' -x",
+        "'/tools/compatibilitytools.d/notproton-fex-rosetta/.'/run run ",
+        "'/tools/compatibilitytools.d/notproton'/run waitforexitandrun  '/g/game.exe'",
+        "'/Volumes/Ext/Steam/compatibilitytools.d/notproton/.'/run waitforexitandrun '/g/game.exe'",
+    };
+    static const char *native[] = {
+        "'/g/Game.app' -windowed",
+        "'/g/Game.app/Contents/MacOS/Game'",
+        "'/tools/compatibilitytools.d/proton-other/.'/run waitforexitandrun '/g/game.exe'",
+        "'/tools/compatibilitytools.d/notproton/Game' -x",
+        "'/tools/compatibilitytools.d/notproton/sub/.'/run waitforexitandrun '/g/game.exe'",
+        "'/tools/compatibilitytools.d/notproton'/other '/g/game.exe'",
+        "",
+    };
+    for (size_t i = 0; i < sizeof(tool) / sizeof(tool[0]); i++)
+        check(np_compat_runs_tool(tool[i]), tool[i]);
+    for (size_t i = 0; i < sizeof(native) / sizeof(native[0]); i++)
+        check(!np_compat_runs_tool(native[i]), native[i]);
+    check(!np_compat_runs_tool(NULL), "no command line is no tool launch");
+}
+
 static int put(const char *dir, const char *name, const char *text) {
     char path[768];
     snprintf(path, sizeof(path), "%s/%s", dir, name);
@@ -368,6 +392,7 @@ int main(void) {
     enabled_cases();
     manager_cases();
     tool_list_cases();
+    tool_launch_cases();
     stale_tool_cases();
     installed_fn_cases();
 

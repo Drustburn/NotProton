@@ -8,23 +8,6 @@ shift || true
 # hook_launch.c passes the launch options through a shell before this script runs, matching
 # Linux Steam. A NAME=value option placed ahead of %command% is an environment variable,
 # and anything after %command% is a launch argument passed to the game.
-# Options saved before the panel wrote %command% arrive after the game instead of ahead of it.
-launch_env=""
-argc=$#
-argi=0
-while [ "$argi" -lt "$argc" ]; do
-  arg="$1"
-  shift
-  case "$arg" in
-    CX_GRAPHICS*=*|D3DM_*=*|DXMT_*=*|DXVK_*=*|MTL_*=*|NOTPROTON_*=*|ROSETTA_*=*|WINE*=*)
-      # shellcheck disable=SC2163 # arg is a NAME=VALUE pair, which export takes as an assignment
-      export "$arg"
-      launch_env="$launch_env $arg"
-      ;;
-    *) set -- "$@" "$arg" ;;
-  esac
-  argi=$((argi + 1))
-done
 launch_args="$*"
 
 case "$verb" in
@@ -85,7 +68,7 @@ fi
 {
   echo "=== notproton run $(date) ==="
   echo "verb=$verb"
-  echo "args:"; for a in "$@"; do echo "  [$a]"; done
+  echo "args:"; for a in "$@"; do printf '  [%s]\n' "$a"; done
   echo "cwd=$(pwd)"
   echo "STEAM_COMPAT_DATA_PATH=$STEAM_COMPAT_DATA_PATH"
   echo "STEAM_COMPAT_INSTALL_PATH=$STEAM_COMPAT_INSTALL_PATH"
@@ -878,9 +861,8 @@ fi
 export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
 exec 8>&-
 trap - EXIT
-echo "launch_args=$launch_args" >> "$log" 2>&1 || true
-[ -z "$launch_env" ] || echo "launch_env=$launch_env" >> "$log" 2>&1 || true
-echo "=== launching ($verb): $WINELOADER $* ===" >> "$log" 2>&1 || true
+printf 'launch_args=%s\n' "$launch_args" >> "$log" 2>&1 || true
+printf '=== launching (%s): %s %s ===\n' "$verb" "$WINELOADER" "$*" >> "$log" 2>&1 || true
 
 target="$1"
 # A game can arrive as a URL with no install path to match, so the verb has to decide the route.
@@ -927,6 +909,8 @@ if [ -x "$appinfo_tool" ] && [ -f "$appinfo_vdf" ]; then
   meta_name=$(printf '%s\n' "$meta" | sed -n 's/^name=//p')
   meta_icon=$(printf '%s\n' "$meta" | sed -n 's/^icon=//p')
   meta_clienticon=$(printf '%s\n' "$meta" | sed -n 's/^clienticon=//p')
+  case "$meta_icon" in *[!0-9a-f]*) meta_icon="" ;; esac
+  case "$meta_clienticon" in *[!0-9a-f]*) meta_clienticon="" ;; esac
 fi
 game_name="$meta_name"
 if [ -z "$game_name" ] && [ -f "$manifest" ]; then

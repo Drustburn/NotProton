@@ -36,23 +36,6 @@ WINEDLLOVERRIDES="lsteamclient=n"
 eval "$overrides_line"
 is "trio outranks user" "lsteamclient=n;steamclient=n;steamclient64=n;lsteamclient=b" "$WINEDLLOVERRIDES"
 
-echo "== options saved without %command% =="
-promote=$(sed -n '/^launch_env=""$/,/^launch_args="\$\*"$/p' "$SRC")
-[ -n "$promote" ] || { echo "FAIL: the trailing option loop not found"; exit 1; }
-trailing() {
-	(
-		set -- "$@"
-		eval "$promote"
-		printf '%s|%s|%s|%s' "${CX_GRAPHICS_BACKEND:-}" "${WINEMSYNC:-}" "$#" "$launch_args"
-	)
-}
-is "known assignments leave the game's arguments" "dxmt|1|2|/g/game.exe -novid" \
-	"$(trailing /g/game.exe CX_GRAPHICS_BACKEND=dxmt -novid WINEMSYNC=1)"
-is "other assignments stay the game's" "||3|/g/game.exe +map=e1m1 P=1" \
-	"$(trailing /g/game.exe +map=e1m1 P=1)"
-is "a path with spaces stays one argument" "||1|/g/My Game/game.exe" \
-	"$(trailing "/g/My Game/game.exe")"
-
 if [ "$fails" -eq 0 ]; then
 	echo "==> envcheck: all assertions hold"
 else
