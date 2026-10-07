@@ -45,7 +45,7 @@ SRCS := \
 	vendor/cJSON.c
 
 OUT_DIR     := out
-TEST_CC = $(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g \
+TEST_CC     := $(CC) -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) -std=c17 -g \
 	-Wall -Wextra -Wno-unused-parameter -Idylib
 
 GENERATED_DIR := $(OUT_DIR)/generated
@@ -514,7 +514,9 @@ app-payload: $(TARGET) $(OVERLAY_SHIM) $(ICONMAKER) $(APPINFO)
 		elif [ -f "$$dst" ]; then echo "==> keeping staged $${spec##*:}"; \
 		else echo "$$src is missing and nothing is staged at $$dst, run: $(MAKE) bridge" >&2; exit 1; fi; \
 	done
-	@date -u +%s > "$(APP_PAYLOAD)/build-time"
+	@stamp="$$(git log -1 --format=%ct 2>/dev/null)"; \
+	if [ -z "$$stamp" ]; then echo "build-time needs a git checkout" >&2; exit 1; fi; \
+	echo "$$stamp" > "$(APP_PAYLOAD)/build-time"
 	@echo "==> Staged app payload in $(APP_PAYLOAD)"
 
 APP_BUNDLE  := $(OUT_DIR)/NotProton.app
