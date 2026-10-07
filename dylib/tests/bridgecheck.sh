@@ -11,8 +11,11 @@ case "$block" in
   *) echo "FAIL: the bridge staging block not found in $SRC"; exit 1 ;;
 esac
 block=$(printf '%s\n' "$block" | sed '$d')
+legacy=$(sed -n '/^install_legacycompat() {/,/^}/p' "$SRC")
+[ -n "$legacy" ] || { echo "FAIL: install_legacycompat not found in $SRC"; exit 1; }
 body='same_volume() { [ -z "$cross" ]; }
 volume_clones() { :; }
+show_alert() { printf "alert: %s\n" "$1" >> "$log"; }
 '"$block
 fi"
 
@@ -154,6 +157,49 @@ stage
 chmod 700 "${cache%/*}"
 is "the launch goes on" reached "$(cat "$work/out")"
 is "every file is copied" 6 "$(staged)"
+
+echo "== a file that cannot be staged stops the launch"
+cross=""
+rm "$steam/steam.exe"
+chmod 500 "$steam"
+stage
+chmod 700 "$steam"
+is "the launch stops" "" "$(grep -x reached "$work/out")"
+logged "the failure is logged" "=== could not copy steam.exe to $steam/steam.exe ==="
+is "the reason is logged" yes "$(grep -q 'Permission denied' "$work/log" && echo yes || echo no)"
+logged "the player is told" "alert: Steam files could not be copied"
+stage
+is "the next launch stages it" reached "$(cat "$work/out")"
+is "every file is copied" 6 "$(staged)"
+
+echo "== a syswow64 trigger that cannot be installed stops the launch"
+trigger=$(sed -n '/^install_lsteamclient_trigger() {/,/^}/p;/^bridge_origin() {/,/^}/p;/^place_bridge_file() {/,/^}/p' "$SRC")
+mkdir -p "$work/bridge/i386-windows" "$prefix/drive_c/windows/syswow64"
+printf 'i386 bridge\n' > "$work/bridge/i386-windows/lsteamclient.dll"
+chmod 500 "$prefix/drive_c/windows/syswow64"
+: > "$work/log"
+env bridge_src="$work/bridge" WINEPREFIX="$prefix" log="$work/log" bridge_cache="" trigger="$trigger" \
+	sh -ec 'eval "$trigger"; if install_lsteamclient_trigger; then echo installed; else echo refused; fi' > "$work/out" 2>&1 || true
+chmod 700 "$prefix/drive_c/windows/syswow64"
+is "the trigger reports the failure" refused "$(cat "$work/out")"
+logged "the failure is logged" "=== could not copy i386-windows/lsteamclient.dll to $prefix/drive_c/windows/syswow64/lsteamclient.dll ==="
+is "the reason is logged" yes "$(grep -q 'Permission denied' "$work/log" && echo yes || echo no)"
+is "the launch checks the trigger" 1 "$(grep -c '^  if ! install_lsteamclient_trigger; then$' "$SRC")"
+env bridge_src="$work/bridge" WINEPREFIX="$prefix" log="$work/log" bridge_cache="" trigger="$trigger" \
+	sh -ec 'eval "$trigger"; if install_lsteamclient_trigger; then echo installed; else echo refused; fi' > "$work/out" 2>&1 || true
+is "a writable prefix gets the trigger" installed "$(cat "$work/out")"
+
+echo "== a legacycompat file that cannot be installed does not stop the launch"
+mkdir -p "$work/bridge/legacycompat" "$work/client/legacycompat"
+printf 'bridge Steam.dll\n' > "$work/bridge/legacycompat/Steam.dll"
+chmod 500 "$work/client/legacycompat"
+: > "$work/log"
+env bridge_src="$work/bridge" STEAM_COMPAT_CLIENT_INSTALL_PATH="$work/client" log="$work/log" \
+	legacy="$legacy" sh -ec 'eval "$legacy"; install_legacycompat; echo reached' > "$work/out" 2>&1 || true
+chmod 700 "$work/client/legacycompat"
+is "the launch goes on" reached "$(cat "$work/out")"
+logged "the failure is logged" "=== could not copy legacycompat/Steam.dll to $work/client/legacycompat/Steam.dll ==="
+is "the reason is logged" yes "$(grep -q 'Permission denied' "$work/log" && echo yes || echo no)"
 
 [ "$fails" -eq 0 ] || { echo "==> bridgecheck: $fails failure(s)"; exit 1; }
 echo "==> bridgecheck: the bridge stages on fresh, current, stale and incomplete prefixes"

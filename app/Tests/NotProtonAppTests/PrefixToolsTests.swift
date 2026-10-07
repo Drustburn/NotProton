@@ -285,7 +285,8 @@ struct PrefixToolsTests {
         for call in calls {
             let rest = source[call.upperBound...]
             let line = try #require(rest.firstIndex(of: "\n"))
-            #expect(rest[line...].hasPrefix("\n  exit 1\n") || rest[line...].hasPrefix("\n    exit 1\n"))
+            let next = rest[rest.index(after: line)...].prefix { $0 != "\n" }
+            #expect(next.trimmingCharacters(in: .whitespaces) == "exit 1")
         }
     }
 

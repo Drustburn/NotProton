@@ -856,7 +856,8 @@ install_lsteamclient_trigger() {
   if place_bridge_file i386-windows/lsteamclient.dll "$dst"; then
     echo "=== installed syswow64 lsteamclient trigger ===" >> "$log" 2>&1 || true
   else
-    echo "=== could not install the syswow64 lsteamclient trigger ===" >> "$log" 2>&1 || true
+    echo "=== could not copy i386-windows/lsteamclient.dll to $dst ===" >> "$log" 2>&1 || true
+    return 1
   fi
 }
 
@@ -869,7 +870,7 @@ install_legacy_steam_dll() {
   if place_bridge_file legacycompat/Steam.dll "$dst"; then
     echo "=== installed legacy Steam.dll ===" >> "$log" 2>&1 || true
   else
-    echo "=== could not install the legacy Steam.dll ===" >> "$log" 2>&1 || true
+    echo "=== could not copy legacycompat/Steam.dll to $dst ===" >> "$log" 2>&1 || true
   fi
 }
 
@@ -885,8 +886,11 @@ install_legacycompat() {
     [ -f "$f" ] || continue
     b=$(basename "$f")
     cmp -s "$f" "$dst/$b" && continue
-    cp -c -f "$f" "$dst/$b" && \
-      echo "=== installed legacycompat/$b ===" >> "$log" 2>&1
+    if cp -c -f "$f" "$dst/$b" 2>> "$log"; then
+      echo "=== installed legacycompat/$b ===" >> "$log" 2>&1 || true
+    else
+      echo "=== could not copy legacycompat/$b to $dst/$b ===" >> "$log" 2>&1 || true
+    fi
   done
 }
 
@@ -912,7 +916,7 @@ bridge_origin() {
 }
 place_bridge_file() {
   bridge_origin "$1"
-  cp -c -fp "$origin" "$2" 2>/dev/null || cp -fp "$bridge_src/$1" "$2"
+  cp -c -fp "$origin" "$2" 2>/dev/null || cp -fp "$bridge_src/$1" "$2" 2>> "$log"
 }
 if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   stage_step="bridge staging"
@@ -936,6 +940,7 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   if [ "$bridge_matches" -eq 1 ]; then
     echo "=== bridge already staged ===" >> "$log" 2>&1 || true
   else
+    unstaged=0
     for f in $bridge_files; do
       rel="$f"
       if [ "$f" = lsteamclient.so ]; then
@@ -947,9 +952,15 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
         continue
       fi
       cmp -s "$src" "$prefix_steam/$f" && continue
-      place_bridge_file "$rel" "$prefix_steam/$f" || \
-        echo "=== failed to stage $f ===" >> "$log" 2>&1
+      if ! place_bridge_file "$rel" "$prefix_steam/$f"; then
+        echo "=== could not copy $rel to $prefix_steam/$f ===" >> "$log" 2>&1 || true
+        unstaged=1
+      fi
     done
+    if [ "$unstaged" -eq 1 ]; then
+      show_alert "Steam files could not be copied" "NotProton could not copy a file into this game's prefix. Open this prefix's notproton-run.log for details."
+      exit 1
+    fi
   fi
   for f in "$prefix_steam"/*.dll "$prefix_steam"/*.so "$prefix_steam"/*.exe; do
     [ -f "$f" ] || continue
@@ -959,7 +970,10 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
     esac
   done
   verify_runner
-  install_lsteamclient_trigger
+  if ! install_lsteamclient_trigger; then
+    show_alert "Steam files could not be copied" "NotProton could not copy a file into this game's prefix. Open this prefix's notproton-run.log for details."
+    exit 1
+  fi
   install_legacy_steam_dll
   export WINEDLLPATH="$prefix_steam:$WINEDLLPATH"
   # If the same DLL appears twice in WINEDLLOVERRIDES, the last entry wins.
