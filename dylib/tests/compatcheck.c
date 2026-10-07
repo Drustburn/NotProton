@@ -4,6 +4,11 @@
 #include "../feats/compat.c"
 
 #include <stdio.h>
+#include <pthread.h>
+#include <stdatomic.h>
+
+static atomic_int home_calls;
+static atomic_int home_ready;
 
 // Silent, because half of these checks drive paths whose whole job is to refuse and log.
 int   np_log_level = -1;
@@ -15,6 +20,10 @@ int np_log_first_hit(const void *anchor, unsigned long tag) {
 }
 
 const char *np_home_dir(void) {
+    if (atomic_fetch_add(&home_calls, 1) == 0) {
+        usleep(50000);
+        atomic_store(&home_ready, 1);
+    }
     return "/nonexistent";
 }
 
@@ -25,6 +34,30 @@ static void check(int ok, const char *what) {
         printf("FAIL %s\n", what);
         failures++;
     }
+}
+
+static void *first_fallback(void *arg) {
+    int *ok = arg;
+    const char *name = np_compat_fallback_tool_name();
+    *ok = atomic_load(&home_ready) && strcmp(name, "notproton") == 0;
+    return NULL;
+}
+
+static void concurrent_fallback_cases(void) {
+    pthread_t threads[16];
+    int results[16] = {0};
+    size_t started = 0;
+    for (; started < 16; started++) {
+        if (pthread_create(&threads[started], NULL, first_fallback, &results[started]) != 0) {
+            check(0, "the fallback reader thread starts");
+            break;
+        }
+    }
+    for (size_t i = 0; i < started; i++) {
+        pthread_join(threads[i], NULL);
+        check(results[i], "every first fallback read waits for initialization");
+    }
+    check(atomic_load(&home_calls) == 2, "the tool list is initialized once");
 }
 
 // A64 encodings the probes look for.
@@ -243,6 +276,8 @@ static void tool_list_cases(void) {
     unlink(path);
     check(kept == 40 && strcmp(g_tools[39].name, "notproton-39") == 0
           && strcmp(g_tools[0].dir, "/tools/notproton-0") == 0, "a long list keeps every tool");
+    check(strcmp(np_compat_fallback_tool_name(), "notproton-0") == 0,
+          "the fallback is the first configured tool");
 
     check(np_compat_load_tool_list("out/compatcheck-missing", "/tools") == 0
           && !g_tool_list_present, "a missing list keeps no tools and says so");
@@ -402,6 +437,7 @@ static void installed_fn_cases(void) {
 }
 
 int main(void) {
+    concurrent_fallback_cases();
     probe_cases();
     oslist_cases();
     enabled_cases();

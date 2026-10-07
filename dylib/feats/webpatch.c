@@ -18,7 +18,7 @@
 // Stands for the name set by np_webpatch_set_fallback_tool.
 #define NP_FALLBACK_TOOL "\021"
 
-static char g_fallback_tool[128];
+static _Thread_local char g_fallback_tool[128];
 
 typedef struct {
     const char *find;

@@ -7,8 +7,8 @@
 
 int np_webpatch_should_patch(const char *path);
 
-// The tool the default tool picker shows before a default has been saved. Names with
-// characters outside letters, digits, '_', '$', '.' and '-' are dropped.
+// Sets the default picker fallback for this thread. Names with characters outside
+// letters, digits, '_', '$', '.' and '-' are dropped.
 void np_webpatch_set_fallback_tool(const char *name);
 
 // The compat UIs, named so a caller can compare against the table rather than a literal

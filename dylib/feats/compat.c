@@ -4,6 +4,7 @@
 #include "../util/file.h"
 
 #include <dirent.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -413,11 +414,7 @@ static int tools_dir_path(char *out, size_t size) {
     return 0;
 }
 
-static void load_tool_list_once(void) {
-    static int loaded = 0;
-    if (loaded) return;
-    loaded = 1;
-
+static void load_tool_list(void) {
     const char *home = np_home_dir();
     char tools_dir[512];
     if (!home || tools_dir_path(tools_dir, sizeof(tools_dir)) != 0) return;
@@ -425,6 +422,11 @@ static void load_tool_list_once(void) {
     char path[512];
     snprintf(path, sizeof(path), "%s/Library/Application Support/notproton/tools", home);
     np_compat_load_tool_list(path, tools_dir);
+}
+
+static void load_tool_list_once(void) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, load_tool_list);
 }
 
 uint32_t np_compat_manager_tools_max(void) {
