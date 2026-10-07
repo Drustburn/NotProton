@@ -244,10 +244,6 @@ struct PrefixesView: View {
                         .menuIndicator(.hidden)
                         .fixedSize()
                         .disabled(model.isBusy || model.tools.isEmpty)
-                        .help(
-                            "Last run by a build that is no longer set up, so the game cannot "
-                                + "start. Click to rebuild the prefix."
-                        )
                         .accessibilityLabel("Needs rebuilding")
                     }
                     Text(prefix.title).help(prefix.title)
@@ -291,7 +287,6 @@ struct PrefixesView: View {
                     Text(usage.bytes.formatted(.byteCount(style: .file)))
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
-                        .help(Text(PrefixStore.privateSizeHelp))
                 } else {
                     Text("Calculating…")
                         .foregroundStyle(contrast == .increased ? .secondary : .tertiary)

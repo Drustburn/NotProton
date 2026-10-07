@@ -159,7 +159,6 @@ struct BackupsView: View {
                 Text(backup.bytes.formatted(.byteCount(style: .file)))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .help(Text(PrefixStore.privateSizeHelp))
             }
             .width(min: 56, ideal: 90)
 

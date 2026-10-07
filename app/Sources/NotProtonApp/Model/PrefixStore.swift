@@ -216,8 +216,6 @@ enum PrefixStore {
         case privateSize, allocated
     }
 
-    static let privateSizeHelp: LocalizedStringResource = "Private size excludes shared APFS extents. Other filesystems use allocated size when private size is unavailable. This is not guaranteed space reclaimed by deletion."
-
     static func directoryBytes(_ url: URL, metric: SizeMetric = .privateSize) -> Int64 {
         struct FileID: Hashable {
             let device: dev_t

@@ -50,7 +50,6 @@ struct StatusRow: View {
     var tone: StatusTone?
     var detail: String?
     var trailing: String?
-    var trailingHelp: LocalizedStringResource = ""
     var secondaryAction: StatusAction?
     var action: StatusAction?
     var menu: [StatusAction] = []
@@ -93,7 +92,6 @@ struct StatusRow: View {
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
-                    .help(Text(trailingHelp))
                     .padding(.trailing, action == nil && menu.isEmpty ? 0 : 8)
             }
             if let toggle {
@@ -546,7 +544,6 @@ struct StatusView: View {
                 tone: crossOverTone(row),
                 detail: crossOverDetail(row, tools: tools),
                 trailing: row.copy == .ready ? buildSize(row.buildID) : nil,
-                trailingHelp: "Runner and template allocated footprints are shown separately. Templates include mounted Steam libraries and may share APFS extents with prefixes. These are not additive physical usage or guaranteed space reclaimed by deletion.",
                 action: crossOverAction(row, prominent: snapshot.runner == .none),
                 menu: crossOverMenu(row)
             )
