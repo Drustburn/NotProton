@@ -71,13 +71,14 @@ enum SupportedRunners {
 
     // First entry is what windows-only games get when Steam has no mapping.
     static let toolPreference = [
-        legacyToolName, "notproton-fex", "notproton-fex-rosetta", "notproton-preview", "notproton-26.3",
+        legacyToolName, "notproton-fex", "notproton-fex-rosetta", "notproton-preview",
+        "notproton-fex-41069", "notproton-fex-rosetta-41069", "notproton-preview-41069", "notproton-26.3",
     ]
 
     static let legacyToolName = "notproton"
 
     // The only builds that can own the 'notproton' tool name.
-    static let legacyHolders = ["27.0.0.40921-fex", "27.0.0.40921"]
+    static let legacyHolders = ["27.0.0.40921-fex", "27.0.0.40921", "27.0.0.41069-fex", "27.0.0.41069"]
 
     enum LegacyHolder: Equatable, Sendable {
         case preferred
@@ -140,7 +141,7 @@ enum SupportedRunners {
                 .i386Windows: "25bfde1f50ee96485763968ef10b9d9ad35e38214232f17ebdc009b098af44a0",
             ],
             tools: [
-                CompatTool(name: "notproton-preview", flavor: .rosetta, display: "CrossOver Preview - X86 Build (Rosetta)", short: "x86 Preview (Rosetta)"),
+                CompatTool(name: "notproton-preview", flavor: .rosetta, display: "CrossOver 20260821 (X86) - Rosetta", short: "20260821 (X86) - Rosetta"),
             ]
         ),
         RunnerBuild(
@@ -159,8 +160,45 @@ enum SupportedRunners {
                 .aarch64Windows: "f40810193a5ef2520774288f354a8604f5ba91828315f643b3ee6688b873dc3f",
             ],
             tools: [
-                CompatTool(name: "notproton-fex", flavor: .fex, display: "CrossOver Preview - ARM64 Build (FEX)", short: "ARM64 Preview (FEX)"),
-                CompatTool(name: "notproton-fex-rosetta", flavor: .rosetta, display: "CrossOver Preview - ARM64 Build (Rosetta)", short: "ARM64 Preview (Rosetta)"),
+                CompatTool(name: "notproton-fex", flavor: .fex, display: "CrossOver 20260821 (ARM64) - FEX", short: "20260821 (ARM64) - FEX"),
+                CompatTool(name: "notproton-fex-rosetta", flavor: .rosetta, display: "CrossOver 20260821 (ARM64) - Rosetta", short: "20260821 (ARM64) - Rosetta"),
+            ]
+        ),
+        RunnerBuild(
+            bundleVersion: "27.0.0.41069",
+            releaseVersion: "20261006",
+            flavor: nil,
+            loaderSHA256: "8286bfd0c6d2ae337e11784926d371a9f7ed7e8da870bd2f435c2bce8eb3c148",
+            cleanNtdll: [
+                .x86_64Windows: "5b388fd48823e905616432fba627eb48f68dc14383963bb213d55db3f691b1b9",
+                .i386Windows: "e7da2a712870222942ef27a80b3bf4fa70fc8545dd1a64bdc7f2fa24a38debc3",
+            ],
+            patchedNtdll: [
+                .x86_64Windows: "9569625387cf179d306b004c556273e2ec15811b2cfd51f21d078e2a0aa06f7f",
+                .i386Windows: "0d8e3ebb57b3173f675eef5e3a0950052c592efa10a7a10193b0beb811b55ea5",
+            ],
+            tools: [
+                CompatTool(name: "notproton-preview-41069", flavor: .rosetta, display: "CrossOver 20261006 (X86) - Rosetta", short: "20261006 (X86) - Rosetta"),
+            ]
+        ),
+        RunnerBuild(
+            bundleVersion: "27.0.0.41069",
+            releaseVersion: "20261006",
+            flavor: "fex",
+            loaderSHA256: "ef2b9a0ad185d8caa2960a97c135a75b8b85ca62425599e35cf672f787fba64c",
+            cleanNtdll: [
+                .x86_64Windows: "1b02dcf6ad9d9490870f1127a421c4c0d1471c65ec1574e1e84c05d69801ac7e",
+                .i386Windows: "66b1a244a611795c59a93a9491d17f36c98cd8db9be495004a37864e0e5ed4a5",
+                .aarch64Windows: "77ca83b2e1a3a1242f9d2d8868328262b2bcfc3f59bacf8b9389ea7e797ea852",
+            ],
+            patchedNtdll: [
+                .x86_64Windows: "7548abd874656f6a6455e7fac659020ed755d92f4e1929a33097bbde964699f5",
+                .i386Windows: "e16b0199db721a08201b1512476b9eff255624d2faf3696fa57ff74b1a54be5c",
+                .aarch64Windows: "7623c0b33350f511b431d39c7ec0c0d4f5def4183acef0eee5d4a5c694898956",
+            ],
+            tools: [
+                CompatTool(name: "notproton-fex-41069", flavor: .fex, display: "CrossOver 20261006 (ARM64) - FEX", short: "20261006 (ARM64) - FEX"),
+                CompatTool(name: "notproton-fex-rosetta-41069", flavor: .rosetta, display: "CrossOver 20261006 (ARM64) - Rosetta", short: "20261006 (ARM64) - Rosetta"),
             ]
         ),
     ]

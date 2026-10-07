@@ -156,8 +156,8 @@ struct PrefixesModelTests {
         func shown(_ appID: String) throws -> String? {
             model.lastTool(try #require(model.prefixes.first { $0.appID == appID }))
         }
-        #expect(try shown("1574480") == "ARM64 Preview (FEX)")
-        #expect(try shown("253750") == "ARM64 Preview (Rosetta)")
+        #expect(try shown("1574480") == "20260821 (ARM64) - FEX")
+        #expect(try shown("253750") == "20260821 (ARM64) - Rosetta")
     }
 
     @Test("A load lists the prefixes and measures each one")

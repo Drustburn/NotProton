@@ -18,22 +18,23 @@ PAYLOAD_BY_CLEAN_SHA = {
     "7823d71fbce6c9947163bf8b96beb299eabb02878245bcaf6759f2a22e81f071": "detour64-fex.bin",
     "6dff64c00793ce92124f1316985c63783f539f26b392975c70f57637458d2387": "detour2-cx26.bin",
     "2c60ee6b00dd13b7f6cb11017778a041ba6a321eaea194f1fa0dca7eab8403e2": "detour32-cx26.bin",
+    "5b388fd48823e905616432fba627eb48f68dc14383963bb213d55db3f691b1b9": "detour2-41069.bin",
+    "e7da2a712870222942ef27a80b3bf4fa70fc8545dd1a64bdc7f2fa24a38debc3": "detour32-41069.bin",
+    "1b02dcf6ad9d9490870f1127a421c4c0d1471c65ec1574e1e84c05d69801ac7e": "detour2-fex-41069.bin",
+    "66b1a244a611795c59a93a9491d17f36c98cd8db9be495004a37864e0e5ed4a5": "detour32-fex-41069.bin",
+    "77ca83b2e1a3a1242f9d2d8868328262b2bcfc3f59bacf8b9389ea7e797ea852": "detour64-fex-41069.bin",
 }
 
-UNAMBIGUOUS_PAYLOAD = {0xaa64: "detour64-fex.bin"}
 KNOWN_MACHINES = (0x8664, 0x14c, 0xaa64)
 
 
-def default_payload(src, machine):
+def default_payload(src):
     with open(src, "rb") as f:
         digest = hashlib.sha256(f.read()).hexdigest()
     if digest in PAYLOAD_BY_CLEAN_SHA:
         return PAYLOAD_BY_CLEAN_SHA[digest]
-    if machine in UNAMBIGUOUS_PAYLOAD:
-        return UNAMBIGUOUS_PAYLOAD[machine]
-    raise SystemExit(f"{src}: sha256 {digest} matches no known clean ntdll, and machine "
-                     f"{machine:#x} has more than one detour, pass payload.bin as the "
-                     f"third argument")
+    raise SystemExit(f"{src}: sha256 {digest} matches no known clean ntdll, "
+                     f"pass payload.bin as the third argument")
 
 
 def append_section(pe, d, r):
@@ -62,7 +63,7 @@ def main():
     if r['machine'] not in KNOWN_MACHINES:
         raise SystemExit(f"{src}: machine {r['machine']:#x} carries no detour")
     payload_path = sys.argv[3] if len(sys.argv) > 3 \
-        else os.path.join(here, default_payload(src, r['machine']))
+        else os.path.join(here, default_payload(src))
     detour = open(payload_path, "rb").read()
     payload_rva = int(v['NP_PAYLOAD_RVA'], 16)
     fill = r['fill']

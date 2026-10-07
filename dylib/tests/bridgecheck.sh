@@ -20,6 +20,11 @@ trap 'rm -rf "$work"' EXIT
 files="steamclient64.dll steamclient.dll tier0_s64.dll vstdlib_s64.dll lsteamclient.dll steam.exe"
 mkdir -p "$work/bridge"
 for f in $files; do printf 'bridge %s\n' "$f" > "$work/bridge/$f"; done
+for arch in aarch64-unix x86_64-unix; do
+	mkdir -p "$work/bridge/$arch"
+	printf '%s bridge\n' "$arch" > "$work/bridge/$arch/lsteamclient.so"
+done
+wine_unix="$work/runner/aarch64-unix"
 
 fails=0
 ok() { printf '  ok    %s\n' "$1"; }
@@ -34,7 +39,7 @@ steam="$prefix/drive_c/Program Files (x86)/Steam"
 stage() {
 	: > "$work/log"
 	env bridge_src="$work/bridge" WINEPREFIX="$prefix" prefix_steam="$steam" \
-		log="$work/log" body="$body" \
+		log="$work/log" body="$body" wine_unix="$wine_unix" \
 		sh -ec 'eval "$body"; echo reached' > "$work/out" 2>&1 || true
 }
 staged() {
@@ -47,12 +52,28 @@ echo "== a fresh prefix gets the whole bridge"
 stage
 is "the launch goes on past staging" reached "$(cat "$work/out")"
 is "every file is copied" 6 "$(staged)"
+is "the ARM64 unix library is staged beside the DLL" "aarch64-unix bridge" "$(cat "$steam/lsteamclient.so" 2>/dev/null)"
 unlogged "nothing claims to be staged already" "=== bridge already staged ==="
 
 echo "== a second launch copies nothing"
 stage
 is "the launch goes on" reached "$(cat "$work/out")"
 logged "the copy is recognised" "=== bridge already staged ==="
+is "the unix library survives pruning" "aarch64-unix bridge" "$(cat "$steam/lsteamclient.so" 2>/dev/null)"
+
+echo "== a different Wine architecture replaces the unix library"
+wine_unix="$work/runner/x86_64-unix"
+stage
+unlogged "the old architecture is not taken as current" "=== bridge already staged ==="
+is "the x86_64 unix library replaces the ARM64 copy" "x86_64-unix bridge" "$(cat "$steam/lsteamclient.so" 2>/dev/null)"
+stage
+logged "the x86_64 copy is recognised" "=== bridge already staged ==="
+
+echo "== a changed unix library is copied again"
+printf 'updated x86_64 bridge\n' > "$work/bridge/x86_64-unix/lsteamclient.so"
+stage
+unlogged "the old unix library is not taken as current" "=== bridge already staged ==="
+is "the prefix receives the updated unix library" "updated x86_64 bridge" "$(cat "$steam/lsteamclient.so" 2>/dev/null)"
 
 echo "== changed bytes with the same size and timestamp"
 cp -p "$work/bridge/steam.exe" "$work/stamp"

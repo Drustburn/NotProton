@@ -169,6 +169,89 @@ enum NtdllPatcher {
                 imageBase: 0x1_8000_0000
             ),
         ],
+        "27.0.0.41069": [
+            NtdllPatch(
+                arch: .x86_64Windows,
+                payloadResource: "detour2-41069",
+                payloadSHA256: "660ea7c935620e620a45a46e552c0a3de9292e031bf93ef676968154d45e78d5",
+                caveRVA: 0x815e0,
+                payloadRVA: 0x815e0,
+                hooks: [
+                    NtdllHook(rva: 0x52055,
+                              stolen: [0x48, 0x83, 0xbc, 0x24, 0xf0, 0x00, 0x00, 0x00, 0x00]),
+                ],
+                caveSize: 2592,
+                cavePad: 0x00,
+                machine: 0x8664,
+                magic: 0x20b,
+                imageBase: 0x1_7000_0000
+            ),
+            NtdllPatch(
+                arch: .i386Windows,
+                payloadResource: "detour32-41069",
+                payloadSHA256: "3eaa5021add0c8e30e324d6b1a6392a32720f5f73596418a2086b7f8081eb1bd",
+                caveRVA: 0x7d1f0,
+                payloadRVA: 0x7d1f0,
+                hooks: [
+                    NtdllHook(rva: 0x4d848, stolen: [0xf6, 0x45, 0xbc, 0x02, 0x75, 0x26]),
+                ],
+                caveSize: 3600,
+                cavePad: 0x00,
+                machine: 0x14c,
+                magic: 0x10b,
+                imageBase: 0x7bc0_0000
+            ),
+        ],
+        "27.0.0.41069-fex": [
+            NtdllPatch(
+                arch: .x86_64Windows,
+                payloadResource: "detour2-fex-41069",
+                payloadSHA256: "0084bba1d7399e749d918dba4f313f1dc1825d2a487f3169b469b57c5b161ca5",
+                caveRVA: 0xb5000,
+                payloadRVA: 0xb5000,
+                hooks: [
+                    NtdllHook(rva: 0x34aae, stolen: [0x48, 0x8b, 0x84, 0x24, 0x10, 0x01, 0x00, 0x00]),
+                ],
+                caveSize: 0x1000,
+                cavePad: 0x00,
+                machine: 0x8664,
+                magic: 0x20b,
+                imageBase: 0x1_7000_0000,
+                placement: .section
+            ),
+            NtdllPatch(
+                arch: .i386Windows,
+                payloadResource: "detour32-fex-41069",
+                payloadSHA256: "6ff6c7289e639c4caad85c2670bfa849d9f36baa24152b6979896caede5e249b",
+                caveRVA: 0xa4000,
+                payloadRVA: 0xa4000,
+                hooks: [
+                    NtdllHook(rva: 0x2ede2, stolen: [0x8b, 0x45, 0x14, 0xa8, 0x02]),
+                ],
+                caveSize: 0x1000,
+                cavePad: 0x00,
+                machine: 0x14c,
+                magic: 0x10b,
+                imageBase: 0x7bc0_0000,
+                placement: .section
+            ),
+            NtdllPatch(
+                arch: .aarch64Windows,
+                payloadResource: "detour64-fex-41069",
+                payloadSHA256: "b27484eaed592366ddd3a5b3c565c2dc05e8fa255fbd7e19d9d8eb619ff57c23",
+                caveRVA: 0xf3185,
+                payloadRVA: 0xf3190,
+                hooks: [
+                    NtdllHook(rva: 0x48738, stolen: [0x1f, 0x20, 0x03, 0xd5]),
+                    NtdllHook(rva: 0xa883c, stolen: [0x1f, 0x20, 0x03, 0xd5]),
+                ],
+                caveSize: 52859,
+                cavePad: 0xcc,
+                machine: 0xaa64,
+                magic: 0x20b,
+                imageBase: 0x1_8000_0000
+            ),
+        ],
     ]
 
     static func patches(for build: RunnerBuild) -> [NtdllPatch] {

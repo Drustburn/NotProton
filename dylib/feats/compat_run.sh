@@ -40,12 +40,12 @@ export CX_ROOT
 
 wine_unix="$CX_ROOT/lib/wine/aarch64-unix"
 WINELOADER="$wine_unix/wine.app/Contents/MacOS/wine"
-WINESERVER="$CX_ROOT/CrossOver-Hosted Application/wineserver-arm64"
+WINESERVER="$CX_ROOT/bin/wineserver-arm64"
 if [ "$np_flavor" = rosetta ] || [ ! -x "$WINELOADER" ] || [ ! -x "$WINESERVER" ]; then
   wine_unix="$CX_ROOT/lib/wine/x86_64-unix"
   WINELOADER="$wine_unix/wine"
-  WINESERVER="$CX_ROOT/CrossOver-Hosted Application/wineserver"
-  [ -x "$WINESERVER" ] || WINESERVER="$CX_ROOT/CrossOver-Hosted Application/wineserver-x86"
+  WINESERVER="$CX_ROOT/bin/wineserver"
+  [ -x "$WINESERVER" ] || WINESERVER="$CX_ROOT/bin/wineserver-x86"
 fi
 export WINELOADER WINESERVER
 
@@ -891,13 +891,17 @@ install_legacycompat() {
 }
 
 bridge_files="steamclient64.dll steamclient.dll tier0_s64.dll vstdlib_s64.dll"
-bridge_files="$bridge_files lsteamclient.dll steam.exe"
+bridge_files="$bridge_files lsteamclient.dll lsteamclient.so steam.exe"
 if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   stage_step="bridge staging"
   mkdir -p "$prefix_steam"
   bridge_matches=1
   for f in $bridge_files; do
-    if ! cmp -s "$bridge_src/$f" "$prefix_steam/$f"; then
+    src="$bridge_src/$f"
+    if [ "$f" = lsteamclient.so ]; then
+      src="$bridge_src/${wine_unix##*/}/$f"
+    fi
+    if ! cmp -s "$src" "$prefix_steam/$f"; then
       bridge_matches=0
       break
     fi
@@ -907,6 +911,9 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   else
     for f in $bridge_files; do
       src="$bridge_src/$f"
+      if [ "$f" = lsteamclient.so ]; then
+        src="$bridge_src/${wine_unix##*/}/$f"
+      fi
       if [ ! -f "$src" ]; then
         echo "=== bridge missing $f ===" >> "$log" 2>&1 || true
         continue
