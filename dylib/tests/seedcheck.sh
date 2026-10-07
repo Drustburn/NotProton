@@ -199,6 +199,23 @@ ln -s /outside "$WINEPREFIX/dosdevices/d:"
 check test "$(prefix_is_bare && echo unsafe || echo refused)" = refused
 
 fixture
+mkdir -p "$WINEPREFIX/dosdevices" "$template_dir/pfx/dosdevices"
+for dir in "$WINEPREFIX" "$template_dir/pfx"; do
+  ln -s ../drive_c "$dir/dosdevices/c:"
+  ln -s / "$dir/dosdevices/z:"
+done
+ln -s /library "$WINEPREFIX/dosdevices/s:"
+check test "$(prefix_is_bare && echo unsafe || echo refused)" = refused
+printf '/elsewhere\n' > "$STEAM_COMPAT_DATA_PATH/notproton-game-drive"
+check test "$(prefix_is_bare && echo unsafe || echo refused)" = refused
+printf '/library\n' > "$STEAM_COMPAT_DATA_PATH/notproton-game-drive"
+check prefix_is_bare
+copy_template_into_prefix
+check test -f "$WINEPREFIX/system.reg"
+check test "$(readlink "$WINEPREFIX/dosdevices/s:")" = /library
+check test "$(readlink "$WINEPREFIX/dosdevices/c:")" = ../drive_c
+
+fixture
 mkdir -p "$WINEPREFIX/drive_c/users/steamuser"
 mkfifo "$WINEPREFIX/drive_c/users/steamuser/fifo"
 check test "$(prefix_is_bare && echo unsafe || echo refused)" = refused

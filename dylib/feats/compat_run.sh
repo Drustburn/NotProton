@@ -675,6 +675,9 @@ prefix_is_bare() (
       [ -e "$node" ] || [ -L "$node" ] || continue
       part="$relative/${node##*/}"
       if [ -L "$node" ]; then
+        if [ "$part" = /dosdevices/s: ] && [ "$(readlink "$node")" = "$(game_drive_record)" ]; then
+          continue
+        fi
         case "$part:$(readlink "$node")" in
           /dosdevices/c::../drive_c|/dosdevices/z::/|/drive_c/users/crossover:steamuser|\
           '/drive_c/users/steamuser/My Documents:./Documents'|\
@@ -789,10 +792,35 @@ prepare_prefix_directory() {
   mkdir -p "$WINEPREFIX"
 }
 
+game_drive_record() {
+  record="$STEAM_COMPAT_DATA_PATH/notproton-game-drive"
+  [ -f "$record" ] && [ ! -L "$record" ] && cat "$record" 2>/dev/null
+}
+
+record_game_drive() {
+  record="$STEAM_COMPAT_DATA_PATH/notproton-game-drive"
+  [ "$(game_drive_record)" != "$1" ] && [ ! -L "$record" ] || return 0
+  { printf '%s\n' "$1" > "$record.new" && mv -f "$record.new" "$record"; } 2>/dev/null \
+    || rm -f "$record.new" 2>/dev/null || true
+}
+
+restart_for_drive() {
+  # Wine only picks up a new drive when it starts.
+  without_lock_fds "$WINESERVER" -k >> "$log" 2>&1 || true
+  without_lock_fds "$WINESERVER" -w >> "$log" 2>&1 || true
+}
+
+unmap_game_drive() {
+  [ -L "$drive" ] && [ "$(readlink "$drive")" = "$(game_drive_record)" ] || return 0
+  rm -f "$drive" || return 0
+  rm -f "$STEAM_COMPAT_DATA_PATH/notproton-game-drive" 2>/dev/null || true
+  echo "=== removed drive S:, the game is not in a Steam library ===" >> "$log" 2>&1 || true
+  restart_for_drive
+}
+
 # Like Proton, the game's Steam library gets drive S: so the game does not run from Z:.
 map_game_drive() {
   drive="$WINEPREFIX/dosdevices/s:"
-  owned="$STEAM_COMPAT_DATA_PATH/notproton-game-drive"
   [ -d "$WINEPREFIX/dosdevices" ] && [ ! -L "$WINEPREFIX/dosdevices" ] || return 0
   library=""
   set -f
@@ -807,7 +835,10 @@ map_game_drive() {
   done
   IFS=$old_ifs
   set +f
-  [ -n "$library" ] || return 0
+  if [ -z "$library" ]; then
+    unmap_game_drive
+    return 0
+  fi
   target=$library
   if real=$(cd -P -- "$library" 2>/dev/null && pwd) && [ "${real##*/}" = steamapps ]; then
     parent=${real%/*}
@@ -819,10 +850,10 @@ map_game_drive() {
   if [ -L "$drive" ]; then
     current=$(readlink "$drive") || return 0
     if [ "$current" = "$target" ]; then
-      printf '%s\n' "$target" > "$owned" 2>/dev/null || true
+      record_game_drive "$target"
       return 0
     fi
-    if [ "$current" != "$(cat "$owned" 2>/dev/null)" ]; then
+    if [ "$current" != "$(game_drive_record)" ]; then
       echo "=== drive S: already points to $current, left in place ===" >> "$log" 2>&1 || true
       return 0
     fi
@@ -832,8 +863,9 @@ map_game_drive() {
     return 0
   fi
   if ln -s "$target" "$drive" 2>> "$log"; then
-    printf '%s\n' "$target" > "$owned" 2>/dev/null || true
+    record_game_drive "$target"
     echo "=== mapped drive S: to $target ===" >> "$log" 2>&1 || true
+    restart_for_drive
   else
     echo "=== could not map drive S: to $target ===" >> "$log" 2>&1 || true
   fi
@@ -868,8 +900,11 @@ if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
     exit 1
   fi
   echo "video: RetinaMode=${NOTPROTON_RETINA:-0}" >> "$log" 2>&1 || true
+  stage_step="game drive"
+  map_game_drive
   stage_step="prefix settings"
   import_prefix_settings
+  # A prefix that Wine built just now only has dosdevices from this point on.
   stage_step="game drive"
   map_game_drive
 fi
