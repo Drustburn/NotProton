@@ -93,6 +93,29 @@ struct CrossOverRowTests {
         #expect(made.map(\.install?.id) == [first.id])
     }
 
+    @Test("A picked copy is found under the row for its path or its build")
+    func pickedCopyListing() {
+        let first = install("CrossOver", Self.release)
+        let second = install("CrossOver", Self.release, root: "/Volumes/Spare")
+        let preview = install("CrossOver Preview", Self.preview, root: "/Volumes/Spare")
+
+        let made = rows([first], installed: [Self.release, Self.preview])
+
+        #expect(CrossOverRow.listing(first, in: made)?.id == first.id)
+        #expect(CrossOverRow.listing(second, in: made)?.id == first.id)
+        #expect(CrossOverRow.listing(preview, in: made) == nil)
+
+        let swapped = install("CrossOver", Self.preview)
+        #expect(CrossOverRow.listing(swapped, in: made) == nil)
+
+        let old = CrossOverInstall(
+            bundle: URL(filePath: "/Applications/CrossOver 24.app"), releaseVersion: "24.0.5",
+            support: .unsupportedBuild("24.0.5")
+        )
+        #expect(CrossOverRow.listing(old, in: rows([old]))?.id == old.id)
+        #expect(CrossOverRow.listing(old, in: made) == nil)
+    }
+
     @Test("An app NotProton doesn't support is listed with its version and nothing to set up")
     func unsupportedApp() {
         let old = CrossOverInstall(

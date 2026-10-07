@@ -65,7 +65,7 @@ enum CrossOverSource {
         return searchRoots.contains { same($0, parent) }
     }
 
-    private static func same(_ a: URL, _ b: URL) -> Bool {
+    static func same(_ a: URL, _ b: URL) -> Bool {
         a.standardizedFileURL.path(percentEncoded: false) == b.standardizedFileURL.path(percentEncoded: false)
     }
 

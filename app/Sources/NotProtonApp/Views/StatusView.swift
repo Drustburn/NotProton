@@ -284,6 +284,16 @@ struct StatusView: View {
     }
 
     private func statusForm(_ snapshot: StatusSnapshot) -> some View {
+        ScrollViewReader { proxy in
+            form(snapshot)
+                .onChange(of: status.highlightedRow) { _, row in
+                    guard let row else { return }
+                    withAnimation { proxy.scrollTo(row, anchor: .center) }
+                }
+        }
+    }
+
+    private func form(_ snapshot: StatusSnapshot) -> some View {
         Form {
             if let failure = status.failure {
                 StatusRow(
@@ -540,6 +550,14 @@ struct StatusView: View {
                 action: crossOverAction(row, prominent: snapshot.runner == .none),
                 menu: crossOverMenu(row)
             )
+            .background {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.accentColor.opacity(0.2))
+                    .padding(-6)
+                    .opacity(status.highlightedRow == row.id ? 1 : 0)
+            }
+            .animation(.easeInOut(duration: 0.3), value: status.highlightedRow == row.id)
+            .id(row.id)
         }
         if case .ready = snapshot.runner, !snapshot.payload.missing(origin: .patched).isEmpty {
             StatusRow(
@@ -566,7 +584,7 @@ struct StatusView: View {
         case .none: return build + (row.licensed == false ? ", not set up or activated" : ", not set up")
         case .unpatched: return build + ", not patched"
         case .damaged: return build + ", copy damaged"
-        case .unsupported: return build + ", no longer supported"
+        case .unsupported: return build + ", not supported"
         }
     }
 

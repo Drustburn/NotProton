@@ -60,6 +60,8 @@ final class SystemStatus {
     var isRefreshing = false
     var activity: String?
     var outcome: String?
+    private(set) var highlightedRow: String?
+    @ObservationIgnored private var highlightReset: Task<Void, Never>?
     private(set) var failure: String?
     private(set) var failureRemedy: Remedy?
 
@@ -271,14 +273,26 @@ final class SystemStatus {
             return
         }
 
-        let found = snapshot?.crossOver.contains {
-            $0.bundle.standardizedFileURL == picked.standardizedFileURL
-        } ?? false
-        if !found {
-            CrossOverSource.addManualBundle(picked)
-            AppLog.note("crossOver added: \(picked.path(percentEncoded: false))")
-        }
         await refresh()
+        if let row = CrossOverRow.listing(CrossOverSource.inspect(bundle: picked), in: crossOverRows) {
+            AppLog.note("crossOver already listed: \(picked.path(percentEncoded: false))")
+            highlight(row)
+            return
+        }
+        CrossOverSource.addManualBundle(picked)
+        AppLog.note("crossOver added: \(picked.path(percentEncoded: false))")
+        await refresh()
+    }
+
+    private func highlight(_ row: CrossOverRow) {
+        AccessibilityNotification.Announcement("\(row.title) is already listed.").post()
+        highlightReset?.cancel()
+        highlightedRow = row.id
+        highlightReset = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.highlightedRow = nil
+        }
     }
 
     func removeFromList(_ install: CrossOverInstall) async {
