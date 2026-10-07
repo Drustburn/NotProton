@@ -812,6 +812,11 @@ void np_compat_register_crossover(void *compat_mgr) {
     }
 }
 
+const char *np_compat_fallback_tool_name(void) {
+    load_tool_list_once();
+    return g_tool_count > 0 ? g_tools[0].name : TOOL_DIR_NAME;
+}
+
 void *np_compat_registered_tool(void *compat_mgr) {
     if (!compat_mgr)
         return NULL;

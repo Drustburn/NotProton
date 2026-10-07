@@ -117,6 +117,9 @@ void *np_compat_manager(void);
 // Manager-owned. Callers read fields without taking ownership.
 void *np_compat_registered_tool(void *compat_mgr);
 
+// Name of the first tool in the app's list, which unmapped Windows games run under.
+const char *np_compat_fallback_tool_name(void);
+
 uint32_t np_compat_manager_tools_max(void);
 
 // Absolute path to the directory of the first tool in the app's list, or NULL.

@@ -15,6 +15,11 @@
 #define NP_C8 "\010"
 #define NP_CAP_MAX 8
 
+// Stands for the name set by np_webpatch_set_fallback_tool.
+#define NP_FALLBACK_TOOL "\021"
+
+static char g_fallback_tool[128];
+
 typedef struct {
     const char *find;
     const char *replace;
@@ -32,12 +37,29 @@ static int cap_index(unsigned char c) {
     return (c >= 1 && c <= NP_CAP_MAX) ? c - 1 : -1;
 }
 
+void np_webpatch_set_fallback_tool(const char *name) {
+    g_fallback_tool[0] = '\0';
+    if (!name) return;
+    size_t n = strlen(name);
+    if (n >= sizeof(g_fallback_tool)) return;
+    for (size_t i = 0; i < n; i++)
+        if (!is_ident_char((unsigned char)name[i]) && name[i] != '.' && name[i] != '-')
+            return;
+    memcpy(g_fallback_tool, name, n + 1);
+}
+
 static size_t match_at(const char *src, size_t len, size_t pos,
                        const char *find, np_cap_t *caps) {
     for (int i = 0; i < NP_CAP_MAX; i++) { caps[i].at = NULL; caps[i].len = 0; }
 
     size_t s = pos;
     for (const char *f = find; *f; f++) {
+        if (*f == NP_FALLBACK_TOOL[0]) {
+            size_t n = strlen(g_fallback_tool);
+            if (s + n > len || memcmp(src + s, g_fallback_tool, n) != 0) return 0;
+            s += n;
+            continue;
+        }
         int ci = cap_index((unsigned char)*f);
         if (ci < 0) {
             if (s >= len || src[s] != *f) return 0;
@@ -93,6 +115,10 @@ static int out_put(np_out_t *o, const char *p, size_t n) {
 
 static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     for (const char *r = replace; *r; r++) {
+        if (*r == NP_FALLBACK_TOOL[0]) {
+            if (!out_put(o, g_fallback_tool, strlen(g_fallback_tool))) return 0;
+            continue;
+        }
         int ci = cap_index((unsigned char)*r);
         if (ci < 0) {
             if (!out_put(o, r, 1)) return 0;
@@ -327,6 +353,15 @@ static const np_gate_t g_fixes[] = {
       "return n.useEffect(()=>{SteamClient.Apps.GetAvailableCompatTools(e).then(i)},[e,t]),r}"
       "(t.unAppID,r),o=r&&!!t.strCompatToolName&&t.nCompatToolPriority==h.JN,"
       "l=a.length?(a.find(e=>e.strToolName===u.rV.settings.strCompatTool)||a[0]).strToolName:\"\"",
+      1 },
+    // Shows the default tool picker before a default has been saved
+    { "return " NP_C1 "?(0," NP_C2 ".jsx)(" NP_C3 ".B,{feature:" NP_C4 ".OK,label:(0," NP_C5 ".we)"
+      "(\"#Settings_SteamPlay_DefaultTool\"),rgOptions:" NP_C6 ",disabled:0==" NP_C6 ".length,"
+      "selectedOption:" NP_C1 ",",
+      "return(" NP_C1 "||" NP_C6 ".some(e=>e.data===\"" NP_FALLBACK_TOOL "\"))?(0," NP_C2 ".jsx)("
+      NP_C3 ".B,{feature:" NP_C4 ".OK,label:(0," NP_C5 ".we)"
+      "(\"#Settings_SteamPlay_DefaultTool\"),rgOptions:" NP_C6 ",disabled:0==" NP_C6 ".length,"
+      "selectedOption:" NP_C1 "||\"" NP_FALLBACK_TOOL "\",",
       1 },
     { "this.m_bServicesInitialized=!0,SteamClient.UI.NotifyAppInitialized()",
       "this.m_bServicesInitialized=!0," NP_LAUNCH_MIGRATION ",SteamClient.UI.NotifyAppInitialized()", 1 },

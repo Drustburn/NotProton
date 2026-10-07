@@ -215,6 +215,8 @@ int main(int argc, char **argv) {
 
     if (argc < 2) { selfcheck(); return g_wrong; }
 
+    np_webpatch_set_fallback_tool("notproton-fex");
+
     for (int i = 1; i < argc; i++) {
         size_t len = 0;
         uint8_t *buf = slurp(argv[i], &len);
