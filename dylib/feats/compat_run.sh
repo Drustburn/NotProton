@@ -420,6 +420,10 @@ plan_hidden_controllers() {
     controllers_wanted=$(ids_without "$(controller_ids "$SDL_GAMECONTROLLER_IGNORE_DEVICES")" \
       "$(controller_ids "$SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT")")
     controllers_wanted=$(printf '%s\n' "$controllers_wanted" 057e/2006 057e/2007 057e/2009 | sed '/^$/d' | sort -u)
+    # Steam sends install scripts no ignore list. Keep the game's hidden controllers instead of clearing them.
+    if [ "$verb" = run ]; then
+      controllers_wanted=$(printf '%s\n' "$controllers_wanted" "$owned" | sed '/^$/d' | sort -u)
+    fi
     controllers_wanted=$(ids_without "$controllers_wanted" "$(ids_without "$in_registry" "$owned")")
   fi
   controllers_add=$(ids_without "$controllers_wanted" "$in_registry")

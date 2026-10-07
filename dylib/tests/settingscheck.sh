@@ -77,7 +77,7 @@ run_in() {
 		WINESERVER="$work/wineserver" STEAM_COMPAT_DATA_PATH="$case_dir" \
 		SDL_GAMECONTROLLER_IGNORE_DEVICES="${IGNORE-}" \
 		SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT="${EXCEPT-}" \
-		NOTPROTON_RAW_CONTROLLERS="${RAW-}" \
+		NOTPROTON_RAW_CONTROLLERS="${RAW-}" verb="${VERB-waitforexitandrun}" \
 		FAKE_STATUS="$2" FAKE_CALLS="$case_dir/calls" FAKE_IMPORTED="$case_dir/imported" \
 		log="$case_dir/log" body="$body" \
 		sh -ec 'eval "$body"; import_prefix_settings; echo returned' \
@@ -183,6 +183,27 @@ IGNORE='' EXCEPT='' RAW=''
 again "" 0
 { cat "$work/retina-off"; shown 054c/0ce6; } > "$work/expected"
 same_file "so the next launch can remove it once it leaves the list" "$work/expected" "$case_dir/imported"
+
+echo "== helper launches"
+new_case
+in_registry 054c/0ce6 057e/2006 057e/2007 057e/2009
+printf '%s\n' 054c/0ce6 057e/2006 057e/2007 057e/2009 > "$case_dir/notproton-hidden-controllers"
+IGNORE='' EXCEPT='' RAW='' VERB=run
+again "" 0
+same_file "a helper with no list keeps the hidden controllers" "$work/retina-off" "$case_dir/imported"
+is "a helper does not restart the prefix" "reg import C:\\notproton-settings.X" "$(calls)"
+is "a helper keeps them tracked" "054c/0ce6 057e/2006 057e/2007 057e/2009" "$(owned)"
+IGNORE='' EXCEPT='' RAW='1' VERB=run
+again "" 0
+{ cat "$work/retina-off"; shown 054c/0ce6; shown 057e/2006; shown 057e/2007; shown 057e/2009; } > "$work/expected"
+same_file "NOTPROTON_RAW_CONTROLLERS=1 still clears them in a helper" "$work/expected" "$case_dir/imported"
+in_registry 054c/0ce6 057e/2006 057e/2007 057e/2009
+printf '%s\n' 054c/0ce6 057e/2006 057e/2007 057e/2009 > "$case_dir/notproton-hidden-controllers"
+IGNORE='' EXCEPT='' RAW='' VERB=waitforexitandrun
+again "" 0
+{ cat "$work/retina-off"; shown 054c/0ce6; } > "$work/expected"
+same_file "a game with no list still drops them" "$work/expected" "$case_dir/imported"
+unset VERB
 
 in_registry
 rm -f "$case_dir/notproton-hidden-controllers"
