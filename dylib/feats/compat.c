@@ -291,8 +291,6 @@ void np_compat_export_tools_path(void) {
            tools_dir);
 }
 
-#define TOOL_LIST_MAX 8
-
 typedef struct {
     char name[64];
     char build[64];
@@ -301,8 +299,10 @@ typedef struct {
     char dir[640];
 } tool_entry_t;
 
-static tool_entry_t g_tools[TOOL_LIST_MAX];
+// Steam keeps pointers into g_tools.
+static tool_entry_t *g_tools;
 static int g_tool_count;
+static int g_tool_cap;
 static int g_tool_list_present;
 
 static int is_name_char(char c, const char *extra) {
@@ -387,10 +387,16 @@ int np_compat_load_tool_list(const char *path, const char *tools_dir) {
                     "(build %s) is skipped", entry.name, entry.build);
             continue;
         }
-        if (g_tool_count == TOOL_LIST_MAX) {
-            NP_WARN("np_compat_load_tool_list: more than %d tools listed, %s skipped",
-                    TOOL_LIST_MAX, entry.name);
-            continue;
+        if (g_tool_count == g_tool_cap) {
+            int cap = g_tool_cap ? g_tool_cap * 2 : 8;
+            tool_entry_t *grown = realloc(g_tools, (size_t)cap * sizeof(*grown));
+            if (!grown) {
+                NP_WARN("np_compat_load_tool_list: out of memory at %s, the rest is skipped",
+                        entry.name);
+                break;
+            }
+            g_tools = grown;
+            g_tool_cap = cap;
         }
 
         snprintf(entry.dir, sizeof(entry.dir), "%s/%s", tools_dir, entry.name);
@@ -419,6 +425,11 @@ static void load_tool_list_once(void) {
     char path[512];
     snprintf(path, sizeof(path), "%s/Library/Application Support/notproton/tools", home);
     np_compat_load_tool_list(path, tools_dir);
+}
+
+uint32_t np_compat_manager_tools_max(void) {
+    load_tool_list_once();
+    return COMPAT_MANAGER_TOOLS_HEADROOM + (uint32_t)g_tool_count;
 }
 
 static int write_tool(const tool_entry_t *tool) {
@@ -730,7 +741,7 @@ static void *find_tool(void *compat_mgr, const char *wanted) {
     uint8_t *base = (uint8_t *)compat_mgr;
     uint8_t *array = *(uint8_t **)(base + COMPAT_MANAGER_TOOL_ARRAY_OFF);
     uint32_t count = *(uint32_t *)(base + COMPAT_MANAGER_TOOL_COUNT_OFF);
-    if (!array || count > COMPAT_MANAGER_TOOLS_MAX) {
+    if (!array || count > np_compat_manager_tools_max()) {
         // Once, because Steam walks this for every windows-only app as the library
         // redraws and a count this wrong does not correct itself.
         static const char once = 0;
@@ -768,7 +779,11 @@ void np_compat_register_crossover(void *compat_mgr) {
     // the registration gate, from_oslist=windows intersects the app mask so the
     // dropdown keeps it, and appid 0 marks a manager-local tool the resolver routes
     // to the local run script.
-    static uint8_t buffers[TOOL_LIST_MAX][COMPAT_TOOL_STRIDE + 64];
+    uint8_t (*buffers)[COMPAT_TOOL_STRIDE + 64] = calloc((size_t)g_tool_count, sizeof(*buffers));
+    if (g_tool_count && !buffers) {
+        NP_WARN("np_compat_register_crossover: out of memory, no tool registered");
+        return;
+    }
     static const char from_oslist[] = "windows";
     static const char to_oslist[]   = "macos";
 

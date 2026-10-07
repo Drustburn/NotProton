@@ -108,7 +108,7 @@ enum CompatToolList {
         return (builds, listed, SupportedRunners.tools(for: builds, legacy: holder))
     }
 
-    // 1.0/1.0.1 used the single 'notproton' tool name and wrote no tool list, so the
+    // 1.0.x used the single 'notproton' tool name and wrote no tool list, so the
     // runners/current symlink is the record of which version of CrossOver was deployed.
     static func legacyHolder(
         builds: [RunnerBuild], listed: String?, runners: URL = SupportPaths.runners
@@ -127,7 +127,7 @@ enum CompatToolList {
            ids.contains(id), SupportedRunners.legacyHolders.contains(id) {
             return .build(id)
         }
-        return .preferred
+        return .nobody
     }
 
     // Returns true when the list file changed.

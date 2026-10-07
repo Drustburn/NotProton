@@ -81,15 +81,13 @@ enum SupportedRunners {
     static let legacyHolders = ["27.0.0.40921-fex", "27.0.0.40921", "27.0.0.41069-fex", "27.0.0.41069"]
 
     enum LegacyHolder: Equatable, Sendable {
-        case preferred
         case build(String)
         case nobody
     }
 
-    static func tools(for builds: [RunnerBuild], legacy: LegacyHolder = .preferred) -> [InstalledTool] {
+    static func tools(for builds: [RunnerBuild], legacy: LegacyHolder = .nobody) -> [InstalledTool] {
         let installed = Set(builds.map(\.id))
         let holder: String? = switch legacy {
-        case .preferred: legacyHolders.first(where: installed.contains)
         case .build(let id): id
         case .nobody: nil
         }

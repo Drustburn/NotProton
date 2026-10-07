@@ -149,7 +149,7 @@ static void enabled_cases(void) {
 
 // A manager holding `count` entries, the one at `named_slot` carrying the tool name.
 static uint8_t manager[0x400];
-static uint8_t entries[COMPAT_MANAGER_TOOLS_MAX * (COMPAT_TOOL_STRIDE + 64)];
+static uint8_t entries[(COMPAT_MANAGER_TOOLS_HEADROOM + 64) * (COMPAT_TOOL_STRIDE + 64)];
 
 static void *build_manager(uint32_t count, int named_slot) {
     memset(manager, 0, sizeof manager);
@@ -176,9 +176,11 @@ static void manager_cases(void) {
 
     // A count this large means the offset it was read from moved, so the array it
     // describes is not one to walk.
-    check(np_compat_registered_tool(build_manager(COMPAT_MANAGER_TOOLS_MAX + 1, 1)) == NULL,
+    uint32_t cap = np_compat_manager_tools_max();
+    check(cap <= COMPAT_MANAGER_TOOLS_HEADROOM + 64, "the manager fixture holds the cap");
+    check(np_compat_registered_tool(build_manager(cap + 1, 1)) == NULL,
           "a count past the cap is refused rather than walked");
-    check(np_compat_registered_tool(build_manager(COMPAT_MANAGER_TOOLS_MAX, -1)) == NULL,
+    check(np_compat_registered_tool(build_manager(cap, -1)) == NULL,
           "a count at the cap is still walked");
 
     mgr = build_manager(3, 1);
@@ -228,6 +230,19 @@ static void tool_list_cases(void) {
     *(const char **)(entries + COMPAT_TOOL_NAME_OFF) = "notproton";
     check(np_compat_registered_tool(mgr) == entries,
           "the first listed tool wins when the manager holds it");
+
+    f = fopen(path, "w");
+    if (!f) {
+        check(0, "the long tool list fixture can be written");
+        return;
+    }
+    for (int i = 0; i < 40; i++)
+        fprintf(f, "notproton-%d\t1\trosetta\tTool %d\n", i, i);
+    fclose(f);
+    kept = np_compat_load_tool_list(path, "/tools");
+    unlink(path);
+    check(kept == 40 && strcmp(g_tools[39].name, "notproton-39") == 0
+          && strcmp(g_tools[0].dir, "/tools/notproton-0") == 0, "a long list keeps every tool");
 
     check(np_compat_load_tool_list("out/compatcheck-missing", "/tools") == 0
           && !g_tool_list_present, "a missing list keeps no tools and says so");

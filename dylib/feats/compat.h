@@ -12,9 +12,7 @@
 #define COMPAT_MANAGER_TOOL_COUNT_OFF  0x330
 #define COMPAT_TOOL_NAME_OFF           0x40
 
-// Sanity cap: the client ships one tool on macOS, so a count above this means
-// the offset moved and the array walk would read past the end.
-#define COMPAT_MANAGER_TOOLS_MAX       32
+#define COMPAT_MANAGER_TOOLS_HEADROOM  32
 
 // Platform bits GetValidPlatforms reports.
 #define COMPAT_PLATFORM_WINDOWS  0x1
@@ -118,6 +116,8 @@ void *np_compat_manager(void);
 // The first tool in the app's list the manager holds, or NULL.
 // Manager-owned. Callers read fields without taking ownership.
 void *np_compat_registered_tool(void *compat_mgr);
+
+uint32_t np_compat_manager_tools_max(void);
 
 // Absolute path to the directory of the first tool in the app's list, or NULL.
 const char *np_compat_tool_dir(void);

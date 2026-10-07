@@ -9,6 +9,8 @@ struct RunnerPrepareTests {
     private static let rosetta = SupportedRunners.all.first { $0.id == "27.0.0.40921" }!
     private static let fex = SupportedRunners.all.first { $0.flavor == "fex" }!
     private static let release = SupportedRunners.all.first { $0.id == "26.3.0.39832" }!
+    private static let preview41069 = SupportedRunners.all.first { $0.id == "27.0.0.41069" }!
+    private static let fex41069 = SupportedRunners.all.first { $0.id == "27.0.0.41069-fex" }!
 
     private static let licensed = CrossOverLicense.Status(
         licensed: true, detail: "CrossOver is activated.", diagnostic: "test"
@@ -106,7 +108,7 @@ struct RunnerPrepareTests {
         #expect(toolList(runners) == CompatToolList.contents(
             SupportedRunners.tools(for: [Self.release, Self.fex])
         ))
-        #expect(toolList(runners)?.hasPrefix("notproton\t27.0.0.40921-fex\tfex\t") == true)
+        #expect(toolList(runners)?.hasPrefix("notproton-fex\t27.0.0.40921-fex\tfex\t") == true)
 
         let again = try prepare(Self.release, runners: runners, calls: calls)
         #expect(!again.toolsChanged)
@@ -242,6 +244,10 @@ struct RunnerPrepareTests {
     func secondPreviewRenamesNothing() throws {
         let runners = try makeRunners(cloning: [Self.fex])
         defer { try? FileManager.default.removeItem(at: runners) }
+        try FileManager.default.createSymbolicLink(
+            atPath: runners.appending(path: "current").path(percentEncoded: false),
+            withDestinationPath: "crossover-\(Self.fex.id)/CrossOver"
+        )
         try sync(runners)
         #expect(holder(runners) == Self.fex.id)
 
@@ -253,6 +259,33 @@ struct RunnerPrepareTests {
         #expect(holder(runners) == Self.fex.id)
         #expect(toolList(runners)?.contains("notproton-preview\t\(Self.rosetta.id)\t") == true)
         #expect(toolList(runners)?.contains("notproton-fex-rosetta\t\(Self.fex.id)\t") == true)
+    }
+
+    @Test("A fresh install gives the legacy name to nobody")
+    func freshInstallHasNoLegacyName() throws {
+        let runners = try makeRunners(cloning: [Self.preview41069, Self.fex41069])
+        defer { try? FileManager.default.removeItem(at: runners) }
+
+        try sync(runners)
+        #expect(holder(runners) == nil)
+        #expect(toolList(runners)?.hasPrefix("notproton-fex-41069\t\(Self.fex41069.id)\tfex\t") == true)
+        #expect(toolList(runners)?.contains("notproton-preview-41069\t\(Self.preview41069.id)\t") == true)
+    }
+
+    @Test("A 1.0.3 install keeps the legacy name on 41069")
+    func legacyNameFollows41069() throws {
+        let runners = try makeRunners(cloning: [Self.preview41069, Self.fex41069])
+        defer { try? FileManager.default.removeItem(at: runners) }
+        try FileManager.default.createSymbolicLink(
+            atPath: runners.appending(path: "current").path(percentEncoded: false),
+            withDestinationPath: "crossover-\(Self.preview41069.id)/CrossOver"
+        )
+
+        try sync(runners)
+        #expect(holder(runners) == Self.preview41069.id)
+        try sync(runners)
+        #expect(holder(runners) == Self.preview41069.id)
+        #expect(toolList(runners)?.contains("notproton-fex-41069\t\(Self.fex41069.id)\tfex\t") == true)
     }
 
     @Test("A Preview listed under its own name does not take the legacy name later")

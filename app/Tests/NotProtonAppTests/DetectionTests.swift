@@ -104,7 +104,7 @@ struct CompatToolOrderTests {
         let tools = SupportedRunners.tools(for: [
             try build("26.3.0.39832"), try build("27.0.0.40921-fex"),
         ])
-        #expect(tools.map(\.name) == ["notproton", "notproton-fex-rosetta", "notproton-26.3"])
+        #expect(tools.map(\.name) == ["notproton-fex", "notproton-fex-rosetta", "notproton-26.3"])
         #expect(tools.map(\.build) == ["27.0.0.40921-fex", "27.0.0.40921-fex", "26.3.0.39832"])
     }
 
@@ -113,14 +113,14 @@ struct CompatToolOrderTests {
         let tools = SupportedRunners.tools(for: [
             try build("27.0.0.40921-fex"), try build("27.0.0.40921"),
         ])
-        #expect(tools.map(\.name) == ["notproton", "notproton-fex-rosetta", "notproton-preview"])
+        #expect(tools.map(\.name) == ["notproton-fex", "notproton-fex-rosetta", "notproton-preview"])
         #expect(tools.map(\.build) == ["27.0.0.40921-fex", "27.0.0.40921-fex", "27.0.0.40921"])
         #expect(Set(tools.map(\.display)).count == tools.count)
     }
 
-    @Test("The Rosetta-only Preview serves the legacy name when it is the only Preview")
+    @Test("The Rosetta-only Preview can hold the legacy name")
     func rosettaPreviewAlone() throws {
-        let tools = SupportedRunners.tools(for: [try build("27.0.0.40921")])
+        let tools = SupportedRunners.tools(for: [try build("27.0.0.40921")], legacy: .build("27.0.0.40921"))
         #expect(tools.map(\.name) == ["notproton"])
         #expect(tools.first?.tool.flavor == .rosetta)
     }
