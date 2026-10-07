@@ -83,6 +83,9 @@ struct SteamInstallerTests {
         private var registered: [URL] = []
         func register(_ url: URL) { lock.lock(); registered.append(url); lock.unlock() }
         var registrations: [URL] { lock.lock(); defer { lock.unlock() }; return registered }
+        private var resets = 0
+        func resetInputAccess() { lock.lock(); resets += 1; lock.unlock() }
+        var inputAccessResets: Int { lock.lock(); defer { lock.unlock() }; return resets }
     }
 
     private func install(
@@ -110,7 +113,8 @@ struct SteamInstallerTests {
             verifyRunner: verifyRunner,
             patchRunner: { _, _, _ in },
             stopClient: { _, onStopping in if stopped { onStopping() }; return stopped },
-            register: { calls.register($0) }
+            register: { calls.register($0) },
+            resetInputAccess: { calls.resetInputAccess() }
         )
         if recordBuild {
             try SteamInstaller.finish(outcome, deployedVersion: fixture.deployedVersion, isCurrent: { _ in true })
@@ -131,6 +135,7 @@ struct SteamInstallerTests {
         #expect(outcome.signatureDatabases == 2)
         #expect(outcome.backedUpPlist)
         #expect(!outcome.stoppedClient)
+        #expect(calls.inputAccessResets == 1)
 
         let files = FileManager.default
         #expect(files.fileExists(atPath: fixture.deployedDylib.path(percentEncoded: false)))
@@ -170,7 +175,8 @@ struct SteamInstallerTests {
         let after = try #require(SteamBundle.readInfoPlist(at: fixture.plist))
         let environment = try #require(after[SteamBundle.environmentKey] as? [String: Any])
         #expect(environment["LC_ALL"] as? String == "en_US.UTF-8", "LC_ALL is Valve's and has to survive")
-        #expect(environment.count == 2, "only the insert should have been added")
+        #expect(environment[SteamBundle.controllerBlockKey] as? String == SteamBundle.controllerBlockValue)
+        #expect(environment.count == 3, "only the insert and the controller block should have been added")
         #expect(after["CFBundleVersion"] as? String == "6.1", "the rest of the plist was disturbed")
     }
 
@@ -379,9 +385,11 @@ struct SteamInstallerTests {
         )
         try files.removeItem(at: fixture.support)
 
-        let outcome = try install(fixture, stopped: true)
+        let calls = Calls()
+        let outcome = try install(fixture, calls: calls, stopped: true)
 
         #expect(!outcome.stoppedClient, "Steam was stopped for an install that changed nothing")
+        #expect(calls.inputAccessResets == 0)
         #expect(!outcome.backedUpPlist)
         #expect(outcome.signatureDatabases == 2)
 

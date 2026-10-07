@@ -323,6 +323,14 @@ struct StatusView: View {
                     )
                 }
                 updateBlockRow(snapshot.updateBlocked)
+                StatusRow(
+                    title: "Controller permission",
+                    value: "Clear Steam's controller permission so macOS asks for it again.",
+                    action: StatusAction(
+                        label: "Reset",
+                        isEnabled: status.isIdle
+                    ) { Task { await status.resetControllerPermission() } }
+                )
             }
 
             Section {

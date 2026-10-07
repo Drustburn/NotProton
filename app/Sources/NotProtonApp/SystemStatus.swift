@@ -459,6 +459,21 @@ final class SystemStatus {
         }
     }
 
+    func resetControllerPermission() async {
+        await perform(from: "Resetting Steam's controller permission") { _ in
+            let failed = SteamInstaller.failedInputAccessResets()
+            guard failed.isEmpty else {
+                throw StepFailure(
+                    step: "Reset controller permission",
+                    detail: "macOS did not reset \(failed.joined(separator: ", ")) for Steam."
+                )
+            }
+            return SteamBundle.isRunning
+                ? "Controller permission reset. Restart Steam so macOS asks again."
+                : "Controller permission reset. macOS asks again when Steam starts."
+        }
+    }
+
     func removeEverything() async {
         await perform(from: UninstallPhase.stoppingClient.label) { progress in
             let lock = try DeploymentContent.acquireInstallationLock(for: SupportPaths.Steam.app)

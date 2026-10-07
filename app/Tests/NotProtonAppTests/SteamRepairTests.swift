@@ -136,7 +136,7 @@ struct SteamRepairTests {
 
     // MARK: - The inner plist
 
-    @Test("Clearing the insert removes that key and nothing else")
+    @Test("Clearing the insert removes the keys NotProton added and nothing else")
     func clearsOnlyTheInsert() throws {
         let work = try scratchDirectory("repair")
         defer { try? FileManager.default.removeItem(at: work) }
@@ -150,6 +150,7 @@ struct SteamRepairTests {
         tampered[SteamBundle.environmentKey] = [
             "LC_ALL": "en_US.UTF-8",
             SteamBundle.insertKey: "/Applications/Steam.app/Contents/MacOS/notproton.dylib",
+            SteamBundle.controllerBlockKey: SteamBundle.controllerBlockValue,
         ]
         try SteamBundle.writeInfoPlist(tampered, at: plist)
 
@@ -158,6 +159,7 @@ struct SteamRepairTests {
         let after = try #require(SteamBundle.readInfoPlist(at: plist))
         let environment = try #require(after[SteamBundle.environmentKey] as? [String: Any])
         #expect(environment[SteamBundle.insertKey] == nil)
+        #expect(environment[SteamBundle.controllerBlockKey] == nil)
         #expect(environment["LC_ALL"] as? String == "en_US.UTF-8", "LC_ALL is Valve's and has to survive")
         #expect(environment.count == 1, "the environment dict is kept rather than emptied")
         #expect(after["CFBundleVersion"] as? String == "6.1")

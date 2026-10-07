@@ -7,6 +7,7 @@
 #include "../core/macho.h"
 #include "../hooks/hooks.h"
 #include "../feats/compat.h"
+#include "../feats/input_access.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -154,6 +155,8 @@ static void *install_thread(void *unused) {
                "relaunched client", STEAMCLIENT_DYLIB, WAIT_TIMEOUT_MS);
         return NULL;
     }
+
+    np_input_access_check();
 
     uintptr_t text_base = 0;
     size_t text_size = 0;

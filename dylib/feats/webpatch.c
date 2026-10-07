@@ -199,7 +199,9 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     "{label:\"MetalFX Upscaling (Samples from the resolution the game is set to)\"," \
     "children:(0," RT ".jsx)(" BARREL ".m,{rgOptions:U," \
     "selectedOption:sw?(U.find(u=>u.data&&+u.data===fn)||{data:String(fn)}).data:\"\"," \
-    "onChange:v=>s([[\"DXMT_METALFX_SPATIAL_SWAPCHAIN\",v.data?\"1\":\"\"],[\"DXMT_CONFIG\",fx(v.data)]])})},\"usf\")" \
+    "onChange:v=>s([[\"DXMT_METALFX_SPATIAL_SWAPCHAIN\",v.data?\"1\":\"\"],[\"DXMT_CONFIG\",fx(v.data)]])})},\"usf\")," \
+    "(0," RT ".jsx)(" BARREL ".XY,{label:\"Controllers (May break Steam Input. Not recommended)\",children:" \
+    "T([\"NOTPROTON_RAW_CONTROLLERS\"],\"Let games read controllers directly\",\"1\",\"\")},\"ctl\")" \
     "]})})}"
 
 #define NP_CX_OPTIONS_COMPONENT \

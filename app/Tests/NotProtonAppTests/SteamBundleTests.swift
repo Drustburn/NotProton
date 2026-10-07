@@ -43,6 +43,7 @@ struct SteamBundleTests {
     private enum Insert {
         case absent
         case own
+        case ownWithoutControllerBlock
         case other(String)
     }
 
@@ -68,6 +69,12 @@ struct SteamBundleTests {
         case .absent:
             break
         case .own:
+            let own = SupportPaths.Steam.deployedDylib(inBundle: app)
+            plist[SteamBundle.environmentKey] = [
+                SteamBundle.insertKey: own.path(percentEncoded: false),
+                SteamBundle.controllerBlockKey: SteamBundle.controllerBlockValue,
+            ]
+        case .ownWithoutControllerBlock:
             let own = SupportPaths.Steam.deployedDylib(inBundle: app)
             plist[SteamBundle.environmentKey] = [
                 SteamBundle.insertKey: own.path(percentEncoded: false)
@@ -104,6 +111,14 @@ struct SteamBundleTests {
         #expect(
             try deployment(insert: .own, dylib: true, version: "0.1.0")
                 == .outdated(deployed: "0.1.0", bundled: "0.2.0")
+        )
+    }
+
+    @Test("A bundle patched before the controller block reads as outdated")
+    func missingControllerBlock() throws {
+        #expect(
+            try deployment(insert: .ownWithoutControllerBlock, dylib: true, version: "0.2.0")
+                == .outdated(deployed: "0.2.0", bundled: "0.2.0")
         )
     }
 

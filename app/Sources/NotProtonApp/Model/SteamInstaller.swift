@@ -73,6 +73,7 @@ enum SteamInstaller {
         },
         stopClient: ClientStopper = stopTheClient,
         register: BundleRegistrar = { SteamBundle.register($0) },
+        resetInputAccess: () -> Void = resetInputAccess,
         report: @escaping @Sendable (InstallPhase) -> Void = { _ in }
     ) throws -> InstallOutcome {
         report(.checkingPayload)
@@ -155,6 +156,7 @@ enum SteamInstaller {
             backedUp = try backUpPlist(plist, into: backups)
 
             let priorPlist = try? Data(contentsOf: plist)
+            let priorHash = cdhash(of: app)
             do {
                 try setInsert(at: plist, to: dylib)
 
@@ -165,6 +167,9 @@ enum SteamInstaller {
             } catch {
                 revertPlist(priorPlist, at: plist, app: app)
                 throw error
+            }
+            if cdhash(of: app) != priorHash {
+                resetInputAccess()
             }
         }
 
@@ -245,6 +250,7 @@ enum SteamInstaller {
 
     static func needsPatching(plist: URL, dylib: URL, shipping: URL, app: URL) throws -> Bool {
         let deployed = SteamBundle.currentInsert(at: plist) == dylib.path(percentEncoded: false)
+            && SteamBundle.currentControllerBlock(at: plist) == SteamBundle.controllerBlockValue
         let file = DeploymentContent.File(source: shipping, destination: dylib, name: "notproton.dylib", allowsResigning: true)
         if deployed, try file.matches() {
             AppLog.note("install: Steam already carries this dylib, installing for this account only")
@@ -327,6 +333,7 @@ enum SteamInstaller {
 
         var environment = dict[SteamBundle.environmentKey] as? [String: Any] ?? [:]
         environment[SteamBundle.insertKey] = dylib.path(percentEncoded: false)
+        environment[SteamBundle.controllerBlockKey] = SteamBundle.controllerBlockValue
         dict[SteamBundle.environmentKey] = environment
         try SteamBundle.writeInfoPlist(dict, at: plist)
     }
@@ -340,6 +347,30 @@ enum SteamInstaller {
                 detail: "\(path) could not be signed. "
                     + result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             )
+        }
+    }
+
+    static func cdhash(of app: URL) -> String? {
+        guard let result = try? Shell.run("/usr/bin/codesign", ["-dvvv", app.path(percentEncoded: false)]) else { return nil }
+        return (result.stdout + result.stderr).split(separator: "\n")
+            .first { $0.hasPrefix("CDHash=") }
+            .map { String($0.dropFirst("CDHash=".count)) }
+    }
+
+    // macOS does not automatically clear a pre-existing input access approval, so it needs to be cleared
+    // or Steam Input will silently not work.
+    static let inputAccessServices = ["Accessibility", "PostEvent", "ListenEvent"]
+
+    static func resetInputAccess() {
+        for service in failedInputAccessResets() {
+            AppLog.note("install: could not reset \(service) for Steam")
+        }
+    }
+
+    static func failedInputAccessResets() -> [String] {
+        inputAccessServices.filter { service in
+            let result = try? Shell.run("/usr/bin/tccutil", ["reset", service, "com.valvesoftware.steam"])
+            return result?.succeeded != true
         }
     }
 

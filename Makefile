@@ -9,7 +9,7 @@ CFLAGS   := -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) \
 LDFLAGS  := -arch $(ARCH) -mmacosx-version-min=$(MIN_VER) \
             -dynamiclib -install_name @rpath/notproton.dylib
 
-FRAMEWORKS := -framework CoreFoundation
+FRAMEWORKS := -framework CoreFoundation -framework CoreGraphics
 
 DOBBY_DIR  := build/dobby
 DOBBY_LIBS := $(DOBBY_DIR)/libdobby.a \
@@ -41,6 +41,7 @@ SRCS := \
 	dylib/feats/webui.c \
 	dylib/feats/compatsvc.c \
 	dylib/feats/webpatch.c \
+	dylib/feats/input_access.c \
 	vendor/cJSON.c
 
 OUT_DIR     := out

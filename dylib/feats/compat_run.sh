@@ -368,15 +368,83 @@ lay_out_proton_profile() {
   fi
 }
 
+controller_ids() {
+  printf '%s\n' "$1" | tr ',' '\n' | tr 'A-F' 'a-f' \
+    | sed -n 's/^[[:space:]]*0x\([0-9a-f]\{4\}\)\/0x\([0-9a-f]\{4\}\)[[:space:]]*$/\1\/\2/p' \
+    | sort -u
+}
+
+ids_without() {
+  printf '%s\n' "$2" -- "$1" \
+    | awk '$0 == "--" { s = 1; next } !s { b[$0]; next } $0 != "" && !($0 in b)'
+}
+
+hidraw_lines() {
+  printf '%s\n' "$2" | while read -r id; do
+    [ -n "$id" ] || continue
+    if [ "$1" = add ]; then
+      printf '%s\r\n' "[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WineBus\\Devices\\$id]" \
+        '"Hidraw"=dword:00000000' ''
+    else
+      printf '%s\r\n' "[-HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WineBus\\Devices\\$id]" ''
+    fi
+  done
+}
+
+write_owned_controllers() {
+  if printf '%s\n' "$1" | sed '/^$/d' | sort -u > "$controllers_file.new" \
+    && mv -f "$controllers_file.new" "$controllers_file"; then
+    return 0
+  fi
+  rm -f "$controllers_file.new"
+  return 1
+}
+
+# Proton hides the controllers that Steam Input handles from the Wine process. CrossOver
+# still reads a few directly (DualSense, DualShock 4, Switch 1 Pro Controller and Joy-Cons),
+# so Hidraw=0 hides those too. The Switch controllers get Hidraw=0 even when Steam Input
+# is off, to avoid silently breaking controller support in most games.
+plan_hidden_controllers() {
+  controllers_file="$STEAM_COMPAT_DATA_PATH/notproton-hidden-controllers"
+  controllers_add=""
+  controllers_remove=""
+  controllers_wanted=""
+  [ -n "$STEAM_COMPAT_DATA_PATH" ] && [ ! -L "$controllers_file" ] || return 1
+  owned=""
+  [ ! -f "$controllers_file" ] || owned=$(sed -n '/^[0-9a-f]\{4\}\/[0-9a-f]\{4\}$/p' "$controllers_file")
+  in_registry=""
+  [ ! -f "$WINEPREFIX/system.reg" ] || in_registry=$(tr '[:upper:]' '[:lower:]' < "$WINEPREFIX/system.reg" \
+    | sed -n 's/^\[system\\\\controlset001\\\\services\\\\winebus\\\\devices\\\\\([0-9a-f]\{4\}\/[0-9a-f]\{4\}\)\].*/\1/p' \
+    | sort -u)
+  if [ "$NOTPROTON_RAW_CONTROLLERS" != "1" ]; then
+    controllers_wanted=$(ids_without "$(controller_ids "$SDL_GAMECONTROLLER_IGNORE_DEVICES")" \
+      "$(controller_ids "$SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT")")
+    controllers_wanted=$(printf '%s\n' "$controllers_wanted" 057e/2006 057e/2007 057e/2009 | sed '/^$/d' | sort -u)
+    controllers_wanted=$(ids_without "$controllers_wanted" "$(ids_without "$in_registry" "$owned")")
+  fi
+  controllers_add=$(ids_without "$controllers_wanted" "$in_registry")
+  controllers_remove=$(ids_without "$owned" "$controllers_wanted")
+  write_owned_controllers "$owned
+$controllers_wanted"
+}
+
 import_prefix_settings() {
   if [ "$NOTPROTON_RETINA" = "1" ]; then
     retina_line='"RetinaMode"="y"'
   else
     retina_line='"RetinaMode"=-'
   fi
+  controllers_planned=0
+  if plan_hidden_controllers 2>/dev/null; then
+    controllers_planned=1
+  else
+    controllers_add=""
+    controllers_remove=""
+    echo "=== could not track the hidden controllers, leaving them as they are ===" >> "$log" 2>&1 || true
+  fi
   settings_file=$(mktemp "$WINEPREFIX/drive_c/notproton-settings.XXXXXX" 2>/dev/null) \
     || settings_file=""
-  if [ -z "$settings_file" ] || ! printf '%s\r\n' \
+  if [ -z "$settings_file" ] || ! { printf '%s\r\n' \
       'Windows Registry Editor Version 5.00' '' \
       '[HKEY_LOCAL_MACHINE\Software\Microsoft\Windows NT\CurrentVersion\AeDebug]' '"Auto"="0"' '' \
       '[HKEY_LOCAL_MACHINE\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\AeDebug]' '"Auto"="0"' '' \
@@ -385,6 +453,7 @@ import_prefix_settings() {
       '[HKEY_LOCAL_MACHINE\Software\Classes\steam]' '"URL Protocol"=""' '' \
       '[HKEY_LOCAL_MACHINE\Software\Classes\steam\shell\open\command]' \
       '@="\"C:\\Program Files (x86)\\Steam\\steam.exe\" \"%1\""' '' \
+      && hidraw_lines add "$controllers_add" && hidraw_lines remove "$controllers_remove"; } \
       > "$settings_file" 2>/dev/null; then
     [ -z "$settings_file" ] || rm -f "$settings_file"
     echo "=== could not write the prefix settings, launching without them ===" >> "$log" 2>&1 || true
@@ -395,6 +464,20 @@ import_prefix_settings() {
   without_lock_fds "$WINELOADER" reg import "C:\\${settings_file##*/}" >> "$log" 2>&1 \
     && import_status=0 || import_status=$?
   rm -f "$settings_file"
+  if [ "$import_status" -eq 0 ] && [ "$controllers_planned" -eq 1 ]; then
+    write_owned_controllers "$controllers_wanted" 2>/dev/null || true
+    if [ -n "$controllers_add$controllers_remove" ]; then
+      # Wine only reads these keys when it starts, so restart Wine to apply them.
+      without_lock_fds "$WINESERVER" -k >> "$log" 2>&1 || true
+      without_lock_fds "$WINESERVER" -w >> "$log" 2>&1 || true
+    fi
+    if [ "$NOTPROTON_RAW_CONTROLLERS" = "1" ]; then
+      echo "controllers: games read them directly (NOTPROTON_RAW_CONTROLLERS=1)" >> "$log" 2>&1 || true
+    elif [ -n "$controllers_wanted" ]; then
+      echo "controllers: $(printf '%s\n' "$controllers_wanted" | grep -c .) kept off hidraw" \
+        >> "$log" 2>&1 || true
+    fi
+  fi
   [ "$import_status" -eq 0 ] \
     || echo "=== prefix settings import exited status=$import_status ===" >> "$log" 2>&1 || true
 }
