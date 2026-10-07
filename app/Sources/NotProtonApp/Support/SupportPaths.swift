@@ -63,6 +63,7 @@ enum SupportPaths {
     }
 
     static let prefixTemplateFolder = "notproton-template"
+    static let bridgeCacheFolder = "bridge"
 
     enum Steam {
         static var app: URL { URL(filePath: "/Applications/Steam.app") }

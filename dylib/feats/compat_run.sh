@@ -848,13 +848,12 @@ verify_runner() {
     echo "=== runner is missing $arch/$name, set up the runner in NotProton ===" >> "$log" 2>&1 || true
   done
 }
-# Clone rather than copy where the filesystem allows it.
 install_lsteamclient_trigger() {
   src="$bridge_src/i386-windows/lsteamclient.dll"
   dst="$WINEPREFIX/drive_c/windows/syswow64/lsteamclient.dll"
   [ -f "$src" ] && [ -d "$WINEPREFIX/drive_c/windows/syswow64" ] || return 0
   cmp -s "$src" "$dst" && return 0
-  if cp -c -f "$src" "$dst" 2>/dev/null || cp -f "$src" "$dst"; then
+  if place_bridge_file i386-windows/lsteamclient.dll "$dst"; then
     echo "=== installed syswow64 lsteamclient trigger ===" >> "$log" 2>&1 || true
   else
     echo "=== could not install the syswow64 lsteamclient trigger ===" >> "$log" 2>&1 || true
@@ -867,7 +866,7 @@ install_legacy_steam_dll() {
   dst="$WINEPREFIX/drive_c/windows/syswow64/Steam.dll"
   [ -f "$src" ] && [ -d "$WINEPREFIX/drive_c/windows/syswow64" ] || return 0
   cmp -s "$src" "$dst" && return 0
-  if cp -c -f "$src" "$dst" 2>/dev/null || cp -f "$src" "$dst"; then
+  if place_bridge_file legacycompat/Steam.dll "$dst"; then
     echo "=== installed legacy Steam.dll ===" >> "$log" 2>&1 || true
   else
     echo "=== could not install the legacy Steam.dll ===" >> "$log" 2>&1 || true
@@ -886,16 +885,43 @@ install_legacycompat() {
     [ -f "$f" ] || continue
     b=$(basename "$f")
     cmp -s "$f" "$dst/$b" && continue
-    { cp -c -f "$f" "$dst/$b" 2>/dev/null || cp -f "$f" "$dst/$b"; } && \
+    cp -c -f "$f" "$dst/$b" && \
       echo "=== installed legacycompat/$b ===" >> "$log" 2>&1
   done
 }
 
 bridge_files="steamclient64.dll steamclient.dll tier0_s64.dll vstdlib_s64.dll"
 bridge_files="$bridge_files lsteamclient.dll lsteamclient.so steam.exe"
+# A clone cannot cross drives, so a prefix on another drive clones from a copy of the
+# bridge kept beside that drive's templates.
+bridge_origin() {
+  origin="$bridge_src/$1"
+  [ -n "$bridge_cache" ] || return 0
+  cached="$bridge_cache/$1"
+  for d in "${bridge_cache%/*}" "$bridge_cache" "${cached%/*}"; do
+    [ ! -L "$d" ] || return 0
+  done
+  mkdir -p "${cached%/*}" 2>/dev/null || return 0
+  if ! cmp -s "$origin" "$cached"; then
+    if ! { cp -p "$origin" "$cached.$$" && mv -f "$cached.$$" "$cached"; } 2>/dev/null; then
+      rm -f "$cached.$$"
+      return 0
+    fi
+  fi
+  origin="$cached"
+}
+place_bridge_file() {
+  bridge_origin "$1"
+  cp -c -fp "$origin" "$2" 2>/dev/null || cp -fp "$bridge_src/$1" "$2"
+}
 if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   stage_step="bridge staging"
   mkdir -p "$prefix_steam"
+  bridge_cache=""
+  if [ -n "$STEAM_COMPAT_DATA_PATH" ] && ! same_volume "$bridge_src" "$STEAM_COMPAT_DATA_PATH" \
+    && volume_clones "$STEAM_COMPAT_DATA_PATH"; then
+    bridge_cache="$(dirname "$STEAM_COMPAT_DATA_PATH")/notproton-template/bridge"
+  fi
   bridge_matches=1
   for f in $bridge_files; do
     src="$bridge_src/$f"
@@ -911,17 +937,17 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
     echo "=== bridge already staged ===" >> "$log" 2>&1 || true
   else
     for f in $bridge_files; do
-      src="$bridge_src/$f"
+      rel="$f"
       if [ "$f" = lsteamclient.so ]; then
-        src="$bridge_src/${wine_unix##*/}/$f"
+        rel="${wine_unix##*/}/$f"
       fi
+      src="$bridge_src/$rel"
       if [ ! -f "$src" ]; then
         echo "=== bridge missing $f ===" >> "$log" 2>&1 || true
         continue
       fi
       cmp -s "$src" "$prefix_steam/$f" && continue
-      { cp -c -fp "$src" "$prefix_steam/$f" 2>/dev/null \
-          || cp -fp "$src" "$prefix_steam/$f"; } || \
+      place_bridge_file "$rel" "$prefix_steam/$f" || \
         echo "=== failed to stage $f ===" >> "$log" 2>&1
     done
   fi

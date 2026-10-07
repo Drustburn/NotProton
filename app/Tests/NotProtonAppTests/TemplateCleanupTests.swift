@@ -65,6 +65,43 @@ struct TemplateCleanupTests {
         }
     }
 
+    @Test("The drive's bridge copy stays while any build is set up and goes with the last")
+    func bridgeCacheGoesWithLastBuild() throws {
+        let layout = try Layout()
+        defer { try? FileManager.default.removeItem(at: layout.root) }
+        let cache = layout.folder.appending(path: SupportPaths.bridgeCacheFolder)
+        try FileManager.default.createDirectory(at: cache.appending(path: "x86_64-unix"), withIntermediateDirectories: true)
+        try Data("bridge".utf8).write(to: cache.appending(path: "x86_64-unix/lsteamclient.so"))
+
+        #expect(RunnerInstaller.removePrefixTemplates(keeping: ["26.3.0.39832"], libraries: [layout.library]).isEmpty)
+        #expect(FileManager.default.fileExists(atPath: cache.appending(path: "x86_64-unix/lsteamclient.so").path))
+        #expect(FileManager.default.fileExists(atPath: layout.template.path))
+
+        #expect(RunnerInstaller.removePrefixTemplates(keeping: [], libraries: [layout.library]).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: cache.path))
+        #expect(!FileManager.default.fileExists(atPath: layout.template.path))
+    }
+
+    @MainActor
+    @Test("The bridge copies on every drive are counted once")
+    func countsBridgeCopies() async throws {
+        let layout = try Layout()
+        defer { try? FileManager.default.removeItem(at: layout.root) }
+        let other = SteamLibrary(root: layout.root.appending(path: "second-library"))
+        for library in [layout.library, other] {
+            let cache = library.compatdata.appending(path: SupportPaths.prefixTemplateFolder)
+                .appending(path: SupportPaths.bridgeCacheFolder)
+            try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+            try Data(repeating: 7, count: 4 << 20).write(to: cache.appending(path: "steam.exe"))
+        }
+        let status = SystemStatus()
+
+        await status.refreshRunnerStorage(runners: layout.runners, libraries: [layout.library, other], cleanTemplates: false)
+
+        #expect(status.bridgeCopyBytes >= 8 << 20)
+        #expect(status.bridgeCopyBytes < 9 << 20)
+    }
+
     @Test("Linked template children are unlinked without touching their targets")
     func unlinksChildrenOnly() throws {
         let layout = try Layout()

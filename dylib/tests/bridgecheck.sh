@@ -11,7 +11,9 @@ case "$block" in
   *) echo "FAIL: the bridge staging block not found in $SRC"; exit 1 ;;
 esac
 block=$(printf '%s\n' "$block" | sed '$d')
-body="$block
+body='same_volume() { [ -z "$cross" ]; }
+volume_clones() { :; }
+'"$block
 fi"
 
 work=$(mktemp -d)
@@ -35,11 +37,14 @@ unlogged() { if grep -qxF "$2" "$work/log"; then bad "$1" "no [$2]" "$(cat "$wor
 
 prefix="$work/pfx"
 steam="$prefix/drive_c/Program Files (x86)/Steam"
+compat=""
+cross=""
 
 stage() {
 	: > "$work/log"
 	env bridge_src="$work/bridge" WINEPREFIX="$prefix" prefix_steam="$steam" \
 		log="$work/log" body="$body" wine_unix="$wine_unix" \
+		STEAM_COMPAT_DATA_PATH="$compat" cross="$cross" \
 		sh -ec 'eval "$body"; echo reached' > "$work/out" 2>&1 || true
 }
 staged() {
@@ -105,6 +110,50 @@ stage
 is "the launch goes on" reached "$(cat "$work/out")"
 logged "the missing file is logged" "=== bridge missing steam.exe ==="
 is "the other files are copied" 5 "$(staged)"
+printf 'bridge steam.exe\n' > "$work/bridge/steam.exe"
+
+echo "== a prefix on the same drive clones from the bridge itself"
+rm -rf "$prefix"
+compat="$work/library/compatdata/1"
+cache="$work/library/compatdata/notproton-template/bridge"
+stage
+is "every file is copied" 6 "$(staged)"
+is "no copy of the bridge is made" no "$([ -e "$cache" ] && echo yes || echo no)"
+
+echo "== a prefix on another drive clones from that drive's copy"
+rm -rf "$prefix"
+cross=1
+stage
+is "the launch goes on" reached "$(cat "$work/out")"
+is "every file is copied" 6 "$(staged)"
+is "the drive keeps a copy of steam.exe" "bridge steam.exe" "$(cat "$cache/steam.exe" 2>/dev/null)"
+is "the drive keeps the unix library under its architecture" "updated x86_64 bridge" \
+	"$(cat "$cache/x86_64-unix/lsteamclient.so" 2>/dev/null)"
+is "no temporary copies are left" "" "$(find "$cache" -name '*.[0-9]*' 2>/dev/null)"
+
+echo "== a changed bridge file refreshes the drive's copy"
+printf 'bridge steam.exe, newer build\n' > "$work/bridge/steam.exe"
+stage
+is "the drive's copy is replaced" "bridge steam.exe, newer build" "$(cat "$cache/steam.exe" 2>/dev/null)"
+is "the prefix receives the new file" "bridge steam.exe, newer build" "$(cat "$steam/steam.exe" 2>/dev/null)"
+
+echo "== a linked copy on the drive is not used"
+rm -rf "$prefix" "$cache"
+mkdir -p "$work/elsewhere"
+ln -s "$work/elsewhere" "$cache"
+stage
+is "every file is copied" 6 "$(staged)"
+is "nothing is written through the link" "" "$(ls "$work/elsewhere")"
+rm "$cache"
+
+echo "== a drive that cannot hold a copy still gets the bridge"
+rm -rf "$prefix"
+mkdir -p "${cache%/*}"
+chmod 500 "${cache%/*}"
+stage
+chmod 700 "${cache%/*}"
+is "the launch goes on" reached "$(cat "$work/out")"
+is "every file is copied" 6 "$(staged)"
 
 [ "$fails" -eq 0 ] || { echo "==> bridgecheck: $fails failure(s)"; exit 1; }
 echo "==> bridgecheck: the bridge stages on fresh, current, stale and incomplete prefixes"

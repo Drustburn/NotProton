@@ -517,6 +517,7 @@ final class SystemStatus {
     private(set) var runnerSizes: [String: Int64] = [:]
     private(set) var templateSizes: [String: [CompatTool.Flavor: Int64]] = [:]
     private(set) var templateCleanupFailure: String?
+    private(set) var bridgeCopyBytes: Int64 = 0
 
     func refreshRunnerStorage(
         runners: URL = SupportPaths.runners, libraries: [SteamLibrary] = PrefixStore.libraries(),
@@ -532,6 +533,14 @@ final class SystemStatus {
                 ? RunnerInstaller.removeStalePrefixTemplates(runners: runners, libraries: libraries, reportBusy: false) : []
             var sizes: [String: Int64] = [:]
             var templates: [String: [CompatTool.Flavor: Int64]] = [:]
+            let bridgeCopies = libraries.reduce(Int64(0)) { total, library in
+                let folder = library.compatdata.appending(path: SupportPaths.prefixTemplateFolder)
+                var info = stat()
+                guard lstat(folder.path(percentEncoded: false), &info) == 0,
+                    info.st_mode & S_IFMT == S_IFDIR else { return total }
+                return total + PrefixStore.directoryBytes(
+                    folder.appending(path: SupportPaths.bridgeCacheFolder), metric: .allocated)
+            }
             for build in RunnerStore.clonedBuilds(in: runners) {
                 sizes[build] = known[build] ?? RunnerStore.cloneSize(forBuild: build, runners: runners)
                 templates[build] = libraries.reduce(into: [:]) { totals, library in
@@ -545,10 +554,11 @@ final class SystemStatus {
                     }
                 }
             }
-            return (sizes, templates, failures)
+            return (sizes, templates, failures, bridgeCopies)
         }.value
         runnerSizes = measured.0
         templateSizes = measured.1
         templateCleanupFailure = measured.2.isEmpty ? nil : measured.2.map(\.detail).joined(separator: "\n")
+        bridgeCopyBytes = measured.3
     }
 }

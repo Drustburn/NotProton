@@ -718,7 +718,11 @@ struct StatusView: View {
             }
         } else if payload.isComplete {
             Section("NotProton Components") {
-                StatusRow(title: "Components", value: "Ready.", tone: .ok)
+                StatusRow(
+                    title: "Components", value: "Ready.", tone: .ok,
+                    trailing: status.bridgeCopyBytes > 0
+                        ? "Copies on other drives \(status.bridgeCopyBytes.formatted(.byteCount(style: .file)))" : nil
+                )
             }
         } else if payload.isEmpty {
             Section("NotProton Components") {

@@ -149,7 +149,8 @@ enum RunnerInstaller {
                 guard info.st_mode & S_IFMT == S_IFDIR else { throw POSIXError(.ENOTDIR) }
 
                 for name in try templateDirectoryNames(root) where !kept.contains(name) {
-                    guard name.wholeMatch(of: #/crossover-[A-Za-z0-9.-]+-(x86_64|aarch64)-unix/#) != nil else { continue }
+                    let template = name.wholeMatch(of: #/crossover-[A-Za-z0-9.-]+-(x86_64|aarch64)-unix/#) != nil
+                    guard template || (builds.isEmpty && name == SupportPaths.bridgeCacheFolder) else { continue }
                     do {
                         try removeTemplateEntry(name, in: root, device: info.st_dev)
                     } catch {
