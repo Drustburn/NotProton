@@ -789,6 +789,56 @@ prepare_prefix_directory() {
   mkdir -p "$WINEPREFIX"
 }
 
+# Like Proton, the game's Steam library gets drive S: so the game does not run from Z:.
+map_game_drive() {
+  drive="$WINEPREFIX/dosdevices/s:"
+  owned="$STEAM_COMPAT_DATA_PATH/notproton-game-drive"
+  [ -d "$WINEPREFIX/dosdevices" ] && [ ! -L "$WINEPREFIX/dosdevices" ] || return 0
+  library=""
+  set -f
+  old_ifs=$IFS
+  IFS=:
+  for path in $STEAM_COMPAT_LIBRARY_PATHS; do
+    path=${path%/}
+    [ -n "$path" ] || continue
+    case "$STEAM_COMPAT_INSTALL_PATH/" in
+      "$path"/*) if [ "${#path}" -gt "${#library}" ]; then library=$path; fi ;;
+    esac
+  done
+  IFS=$old_ifs
+  set +f
+  [ -n "$library" ] || return 0
+  target=$library
+  if real=$(cd -P -- "$library" 2>/dev/null && pwd) && [ "${real##*/}" = steamapps ]; then
+    parent=${real%/*}
+    if [ -n "$parent" ] && [ -w "$parent" ] \
+      && [ "$(stat -f %d "$real")" = "$(stat -f %d "$parent")" ]; then
+      target=$parent
+    fi
+  fi
+  if [ -L "$drive" ]; then
+    current=$(readlink "$drive") || return 0
+    if [ "$current" = "$target" ]; then
+      printf '%s\n' "$target" > "$owned" 2>/dev/null || true
+      return 0
+    fi
+    if [ "$current" != "$(cat "$owned" 2>/dev/null)" ]; then
+      echo "=== drive S: already points to $current, left in place ===" >> "$log" 2>&1 || true
+      return 0
+    fi
+    rm -f "$drive" || return 0
+  elif [ -e "$drive" ]; then
+    echo "=== drive S: is not a link, left in place ===" >> "$log" 2>&1 || true
+    return 0
+  fi
+  if ln -s "$target" "$drive" 2>> "$log"; then
+    printf '%s\n' "$target" > "$owned" 2>/dev/null || true
+    echo "=== mapped drive S: to $target ===" >> "$log" 2>&1 || true
+  else
+    echo "=== could not map drive S: to $target ===" >> "$log" 2>&1 || true
+  fi
+}
+
 if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   export WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx"
   stage_step="prefix lock"
@@ -820,6 +870,8 @@ if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   echo "video: RetinaMode=${NOTPROTON_RETINA:-0}" >> "$log" 2>&1 || true
   stage_step="prefix settings"
   import_prefix_settings
+  stage_step="game drive"
+  map_game_drive
 fi
 
 bridge_src="$np_support/bridge"

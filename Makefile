@@ -64,7 +64,7 @@ DEPS := $(OBJS:.o=.d)
         tests-list overlay-shim overlay-shim-install overlay-shim-tests \
         overlay-shim-bench iconmaker icon \
         appinfo helpers-install ntdll-resolve bridge runcheck compatcheck \
-        compatsvc-check scriptcheck envcheck buildcheck settingscheck routecheck bridgecheck launch-shell FORCE
+        compatsvc-check scriptcheck envcheck buildcheck settingscheck routecheck bridgecheck gamedrivecheck launch-shell FORCE
 
 APP_PAYLOAD := app/Sources/NotProtonApp/Resources/payload
 
@@ -115,6 +115,10 @@ routecheck:
 bridgecheck:
 	@if [ ! -f dylib/tests/bridgecheck.sh ]; then $(call SKIP,bridgecheck,dylib/tests/bridgecheck.sh); exit 0; fi; \
 	sh dylib/tests/bridgecheck.sh dylib/feats/compat_run.sh
+
+gamedrivecheck:
+	@if [ ! -f dylib/tests/gamedrivecheck.sh ]; then $(call SKIP,gamedrivecheck,dylib/tests/gamedrivecheck.sh); exit 0; fi; \
+	sh dylib/tests/gamedrivecheck.sh dylib/feats/compat_run.sh
 
 # runcheck owns compat_run.sh, whose warnings wait for a change that can move
 # the embedded __text baseline
