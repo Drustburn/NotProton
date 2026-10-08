@@ -1,5 +1,5 @@
 #!/bin/sh
-# notproton CrossOver compatibility tool shim
+# notproton compatibility tool shim (CrossOver or a self-built Wine runner)
 set -e
 
 verb="$1"
@@ -49,6 +49,14 @@ export WINELOADER WINESERVER
 export WINEDLLPATH="$CX_ROOT/lib/wine/x86_64-windows:$wine_unix"
 export PATH="$CX_ROOT/bin:$PATH"
 
+# A self-built runner (steamplay-mac) carries runner.json; its ntdll is patched in source,
+# so there is no binary-patched copy in the bridge to compare against, and msync is on by
+# default because its wineserver carries the msync fixes.
+runner_kind=crossover
+grep -q '"kind": "selfbuilt"' "$CX_ROOT/runner.json" 2>/dev/null && runner_kind=selfbuilt
+msync_default=0
+[ "$runner_kind" = selfbuilt ] && msync_default=1
+
 if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   log="$STEAM_COMPAT_DATA_PATH/notproton-run.log"
 else
@@ -64,6 +72,7 @@ fi
   echo "STEAM_COMPAT_DATA_PATH=$STEAM_COMPAT_DATA_PATH"
   echo "STEAM_COMPAT_INSTALL_PATH=$STEAM_COMPAT_INSTALL_PATH"
   echo "STEAM_COMPAT_APP_ID=$STEAM_COMPAT_APP_ID"
+  echo "runner=$(readlink "$CX_ROOT" 2>/dev/null || echo "$CX_ROOT") kind=$runner_kind"
   echo "-- steam env passed through --"
   env | grep -iE '^(Steam|SDL_)' | sort
 } >> "$log" 2>&1 || true
@@ -285,7 +294,7 @@ if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
     msync_from=carried-over
   fi
   [ -n "$WINEMSYNC" ] || msync_from=default
-  export WINEMSYNC="${WINEMSYNC:-0}"
+  export WINEMSYNC="${WINEMSYNC:-$msync_default}"
   printf '%s' "$WINEMSYNC" \
     > "$STEAM_COMPAT_DATA_PATH/notproton-msync" 2>/dev/null || true
   stage_step="prefix arch check"
@@ -313,11 +322,13 @@ fi
 bridge_src="$HOME/Library/Application Support/notproton/bridge"
 prefix_steam="$WINEPREFIX/drive_c/Program Files (x86)/Steam"
 verify_runner() {
-  if [ ! -d "$bridge_src/wine" ]; then
+  if [ "$runner_kind" = selfbuilt ]; then
+    :
+  elif [ ! -d "$bridge_src/wine" ]; then
     echo "=== no patched ntdll in the bridge, run NotProton ===" >> "$log" 2>&1 || true
     return
   fi
-  for arch in x86_64-windows i386-windows aarch64-windows; do
+  [ "$runner_kind" = selfbuilt ] || for arch in x86_64-windows i386-windows aarch64-windows; do
     staged="$bridge_src/wine/$arch/ntdll.dll"
     live="$CX_ROOT/lib/wine/$arch/ntdll.dll"
     [ -f "$staged" ] || continue
@@ -416,6 +427,97 @@ if [ -d "$bridge_src" ] && [ -n "$WINEPREFIX" ]; then
   echo "=== bridge staged into $prefix_steam ===" >> "$log" 2>&1 || true
   echo "WINEDLLPATH=$WINEDLLPATH" >> "$log" 2>&1 || true
   echo "STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_COMPAT_CLIENT_INSTALL_PATH" >> "$log" 2>&1 || true
+fi
+
+# Graphics backend. CX_GRAPHICS_BACKEND (the options panel's launch option) wins; otherwise a
+# self-built runner picks by what the game's binaries import: Direct3D 12 -> D3DMetal,
+# Direct3D 10/11 -> DXMT, anything else -> wined3d. CrossOver runners keep their own logic.
+pe_d3d="$HOME/Library/Application Support/notproton/pe-d3d"
+detect_d3d() {
+  [ -x "$pe_d3d" ] && [ -d "$STEAM_COMPAT_INSTALL_PATH" ] || { echo none; return; }
+  # A game that ships Microsoft's D3D12 Agility SDK renders with Direct3D 12.
+  if find "$STEAM_COMPAT_INSTALL_PATH" -maxdepth 6 -ipath '*/D3D12/D3D12Core.dll' 2>/dev/null | grep -q .; then
+    echo "  hint: bundled D3D12 Agility SDK" >> "$log" 2>&1 || true
+    echo d3d12
+    return
+  fi
+  # the launch target plus the largest executables (a launcher stub often fronts the
+  # real *-Shipping.exe), and the engine DLLs that do the rendering (Unity, CryEngine...)
+  candidates=$(
+    { [ -f "$1" ] && printf '%s\n' "$1"
+      find "$STEAM_COMPAT_INSTALL_PATH" -maxdepth 6 -type f \( -iname '*.exe' -o -iname 'UnityPlayer.dll' \
+          -o -iname '*render*.dll' -o -iname '*d3d1[12]*.dll' -o -iname 'CryRenderD3D*.dll' \) -size +200k 2>/dev/null \
+        | grep -viE '/(_commonredist|commonredist|redist|redistributables|directx|vcredist|dotnet|support|easyanticheat|battleye|__installer|installers?|crashreport[a-z]*)/' \
+        | grep -viE '/d3d12/(d3d12core|d3d12sdklayers)\.dll$' \
+        | while IFS= read -r f; do printf '%s\t%s\n' "$(stat -f %z "$f")" "$f"; done \
+        | sort -rn | head -12 | cut -f2-
+    } | awk '!seen[$0]++')
+  [ -n "$candidates" ] || { echo none; return; }
+  scan=$(printf '%s\n' "$candidates" | tr '\n' '\0' | xargs -0 "$pe_d3d" 2>/dev/null)
+  printf '%s\n' "$scan" | sed 's/^/  pe-d3d: /' >> "$log" 2>&1 || true
+  flags=$(printf '%s\n' "$scan" | cut -d' ' -f1 | tr ',\n' '  ')
+  # Engines that load their renderer at run time (Unreal Engine 5 among them) import no
+  # Direct3D DLL at all; the names of the runtimes in the largest binary are the best
+  # remaining hint.
+  case " $flags " in
+    *" d3d"*|*" dxgi:"*|*" ddraw:"*|*" opengl:"*|*" vulkan:"*) ;;
+    *)
+      if :; then
+        big=$(printf '%s\n' "$candidates" | while IFS= read -r f; do printf '%s\t%s\n' "$(stat -f %z "$f")" "$f"; done \
+          | sort -rn | head -1 | cut -f2-)
+        if [ -f "$big" ]; then
+          if LC_ALL=C grep -a -q -i 'd3d12\.dll' "$big"; then flags="$flags d3d12:d"
+          elif LC_ALL=C grep -a -q -i 'd3d11\.dll' "$big"; then flags="$flags d3d11:d"
+          elif LC_ALL=C grep -a -q -i 'd3d9\.dll' "$big"; then flags="$flags d3d9:d"
+          fi
+          echo "  hint: runtime names in $(basename "$big"): $flags" >> "$log" 2>&1 || true
+        fi
+      fi
+      ;;
+  esac
+  case " $flags " in
+    *" d3d12:i "*) echo d3d12 ;;
+    *" d3d11:i "*|*" dxgi:i "*|*" d3d10:i "*) echo d3d11 ;;
+    *" d3d12:d "*) echo d3d12 ;;
+    *" d3d11:d "*|*" dxgi:d "*|*" d3d10:d "*) echo d3d11 ;;
+    *" d3d9:"*|*" d3d8:"*|*" ddraw:"*) echo d3d9 ;;
+    *" opengl:"*) echo opengl ;;
+    *" vulkan:"*) echo vulkan ;;
+    *) echo none ;;
+  esac
+}
+if [ "$runner_kind" = selfbuilt ]; then
+  backend="${CX_GRAPHICS_BACKEND:-auto}"
+  backend_from=launch-options
+  if [ "$backend" = auto ]; then
+    api=$(detect_d3d "$1")
+    case "$api" in
+      d3d12) backend=d3dmetal ;;
+      d3d11) backend=dxmt ;;
+      *) backend=wined3d ;;
+    esac
+    backend_from="auto ($api)"
+  fi
+  case "$backend" in
+    d3dmetal)
+      export WINEDLLPATH_PREPEND="$CX_ROOT/lib/renderers/d3dmetal"
+      export CX_APPLEGPTK_LIBD3DSHARED_PATH="$CX_ROOT/lib/external/libd3dshared.dylib"
+      ;;
+    dxmt)
+      export WINEDLLPATH_PREPEND="$CX_ROOT/lib/renderers/dxmt"
+      ;;
+    dxvk)
+      if [ -d "$CX_ROOT/lib/renderers/dxvk" ]; then
+        export WINEDLLPATH_PREPEND="$CX_ROOT/lib/renderers/dxvk"
+      else
+        echo "=== no DXVK in this runner, using wined3d ===" >> "$log" 2>&1 || true
+        backend=wined3d
+      fi
+      ;;
+    *) backend=wined3d ;;
+  esac
+  export CX_ACTIVE_GRAPHICS_BACKEND="$backend"
+  echo "graphics: $backend from $backend_from" >> "$log" 2>&1 || true
 fi
 
 export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
@@ -595,6 +697,7 @@ fi
 cat > "$loader_macos/launcher" <<LAUNCHER
 #!/bin/sh
 export WINELOADER="$WINELOADER"
+export DYLD_FALLBACK_LIBRARY_PATH="$CX_ROOT/lib:/usr/local/lib:/usr/lib"
 wine_log="$loader_root/notproton-wine.log"
 exec > "\$wine_log" 2>&1
 shim="$HOME/Library/Application Support/notproton/overlay-shim.dylib"
@@ -683,7 +786,7 @@ else
   echo "=== client staged no overlay renderer, overlay disabled ===" >> "$log" 2>&1 || true
 fi
 set -- --args "$shim_exe" "$@"
-for name in $(env | sed -nE 's/^(Steam[A-Za-z0-9]*|(CX_GRAPHICS|D3DM_|DXMT_|DXVK_|MTL_|ROSETTA_)[A-Z0-9_]*)=.*/\1/p'); do
+for name in $(env | sed -nE 's/^(Steam[A-Za-z0-9]*|WINEDLLPATH_PREPEND|(CX_GRAPHICS|CX_ACTIVE_GRAPHICS|CX_APPLEGPTK_|D3DM_|DXMT_|DXVK_|MTL_|ROSETTA_)[A-Z0-9_]*)=.*/\1/p'); do
   eval "value=\$$name"
   # shellcheck disable=SC2154 # eval assigns value on the line above
   set -- --env "$name=$value" "$@"

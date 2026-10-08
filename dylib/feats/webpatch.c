@@ -119,8 +119,8 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     "s=ps=>{const a=o.split(\" \").filter(x=>x&&!ps.some(p=>x.indexOf(p[0]+\"=\")===0));" \
     "ps.forEach(p=>{if(p[1])a.unshift(p[0]+\"=\"+p[1])});" \
     "SteamClient.Apps.SetAppLaunchOptions(t.unAppID,a.join(\" \"))}," \
-    "T=(ks,l,on,off)=>(0," RT ".jsx)(" BARREL ".Yh,{className:\"MSCXRow\",label:l," \
-    "checked:g(ks[0])===on," \
+    "T=(ks,l,on,off,d)=>(0," RT ".jsx)(" BARREL ".Yh,{className:\"MSCXRow\",label:l," \
+    "checked:(g(ks[0])||d||\"\")===on," \
     "onChange:v=>s(ks.map(k=>[k,v?on:(off||\"\")]))},ks[0])," \
     "b=g(\"CX_GRAPHICS_BACKEND\")," \
     "dm=\"\"===b||\"d3dmetal\"===b," \
@@ -153,7 +153,7 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     "dm&&T([\"D3DM_ENABLE_METALFX\"],\"DLSS\",\"1\")," \
     "\"dxmt\"===b&&T([\"DXMT_ENABLE_NVEXT\"],\"DLSS\",\"1\")," \
     "T([\"ROSETTA_ADVERTISE_AVX\"],\"Advertise AVX2 to Rosetta\",\"1\",\"0\")," \
-    "T([\"WINEMSYNC\"],\"MSync\",\"1\",\"0\")," \
+    "T([\"WINEMSYNC\"],\"MSync\",\"1\",\"0\",\"1\")," \
     "T([\"NOTPROTON_RETINA\"],\"High Resolution\",\"1\",\"0\")" \
     "]},\"gfx\")," \
     "dx&&(0," RT ".jsx)(" BARREL ".XY," \
@@ -206,7 +206,7 @@ static const np_gate_t g_gates_forcetool[] = {
       "!s.local_per_client_data?.installed&&"
       "s.most_available_per_client_data?.is_invalid_os_type&&(0,n.jsx)(U,{})", 1 },
     { "(0,h.we)(\"#GameList_Entry_Invalid_OSType2\")",
-      "\"Enable CrossOver under Properties > Compatibility to install and run "
+      "\"Enable Steam Play (Wine) under Properties > Compatibility to install and run "
       "the Windows version.\"", 1 },
 };
 
@@ -239,7 +239,7 @@ static const np_gate_t g_gates_selecttool[] = {
       NP_C1 ".most_available_per_client_data?.is_invalid_os_type&&"
       "(0," NP_C2 ".jsx)(" NP_C3 ",{})", 1 },
     { "(0," NP_C1 ".we)(\"#GameList_Entry_Invalid_OSType2\")",
-      "\"Enable CrossOver under Properties > Compatibility to install and run "
+      "\"Enable Steam Play (Wine) under Properties > Compatibility to install and run "
       "the Windows version.\"", 1 },
 };
 

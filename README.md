@@ -1,3 +1,9 @@
+> **Fork note (branch `selfbuilt-wine`):** this branch adds support for a self-built Wine runner
+> (CrossOver 26.3 LGPL sources + Valve's lsteamclient patches in source) next to CrossOver, with
+> automatic per-game graphics selection (`helpers/pe-d3d.c`) and msync on by default. It is used by
+> [steamplay-mac](https://github.com/Drustburn/steamplay-mac), which builds that runner. CrossOver
+> runners and their licence check are untouched. Upstream: https://github.com/NotProtonNot/NotProton
+
 # NotProton
 
 NotProton enables the Steam Play experience from Linux Steam in the macOS Steam client.

@@ -14,7 +14,7 @@
 // the tool's name contains "proton" so without a match every AutoCloud rule silently
 // skips the app.
 #define TOOL_DIR_NAME "notproton"
-#define TOOL_DISPLAY_NAME "CrossOver Preview"
+#define TOOL_DISPLAY_NAME "Steam Play (Wine, self-built)"
 
 #define COMPAT_MANAGER_ENABLED_OFF  0x7B0
 #define COMPAT_TOOL_STRIDE          0x130
