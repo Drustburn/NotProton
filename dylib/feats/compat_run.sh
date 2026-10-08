@@ -541,12 +541,25 @@ fi
 
 # Apple's Metal Performance HUD: when it is on and nothing else is configured, keep it small
 # in the top-right corner with just the frame rate and frame time.
+# Below it, syshud adds what Metal cannot show (CPU/GPU load, RAM, OS, runner, backend);
+# NOTPROTON_SYSHUD=0 leaves it out.
+syshud_pid=""
 if [ "${MTL_HUD_ENABLED:-0}" = 1 ]; then
   export MTL_HUD_ALIGNMENT="${MTL_HUD_ALIGNMENT:-topright}"
-  export MTL_HUD_SCALE="${MTL_HUD_SCALE:-0.1}"
+  export MTL_HUD_SCALE="${MTL_HUD_SCALE:-0.12}"
   export MTL_HUD_OPACITY="${MTL_HUD_OPACITY:-0.85}"
-  export MTL_HUD_ELEMENTS="${MTL_HUD_ELEMENTS:-fps,frameinterval}"
+  export MTL_HUD_ELEMENTS="${MTL_HUD_ELEMENTS:-fps,frameinterval,gputime,presentdelay,layersize,memory,fpsgraph}"
   echo "hud: $MTL_HUD_ALIGNMENT scale=$MTL_HUD_SCALE elements=$MTL_HUD_ELEMENTS" >> "$log" 2>&1 || true
+  syshud="$HOME/Library/Application Support/notproton/syshud"
+  if [ "${NOTPROTON_SYSHUD:-1}" = 1 ] && [ -x "$syshud" ] && [ "$verb" != run ]; then
+    rows=$(printf '%s' "$MTL_HUD_ELEMENTS" | tr ',' '\n' | grep -c .)
+    case ",$MTL_HUD_ELEMENTS," in *graph*|*histogram*) rows=$((rows + 3)) ;; esac
+    wine_label="$(sed -n 's/.*"wine": "\(.*\)".*/\1/p' "$CX_ROOT/runner.json" 2>/dev/null) ($(readlink "$CX_ROOT" 2>/dev/null || echo runner))"
+    "$syshud" --offset "${NOTPROTON_SYSHUD_OFFSET:-$((14 + rows * 14))}" \
+      --label "Wine: $wine_label" --label "Graphics: ${backend:-${CX_ACTIVE_GRAPHICS_BACKEND:-?}} (Rosetta)" \
+      --pid $$ --app "com.notproton.launcher.$app_id" >> "$log" 2>&1 &
+    syshud_pid=$!
+  fi
 fi
 
 export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
