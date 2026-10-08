@@ -16,9 +16,8 @@ makes/places in the ```~/Library/Application Support/notproton/runners/``` folde
 lsteamclient is loaded.
 
 This release is coming several days past when I wanted to release it, so the
-documentation is quite sparse. Sorry about that, I'll improve it over the next day or
-two.
+documentation is quite sparse. Sorry about that, I'll improve it shortly.
 
 Please read NOTICE for license information.
 
-Please open issue reports with any issues. PRs are welcome and encouraged.
+Please open issue reports with any issues. PRs are welcome and encouraged. Contributions policy to come shortly.
