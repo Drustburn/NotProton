@@ -7,7 +7,7 @@ present and inert) as well as by porting some components of Valve's Proton to ma
 
 This tool is intended to be used with Steam Client 1788652215 or 1790121765 and **CrossOver Preview
 20261006 or 2026082**. Both the FEX build and the Rosetta build are supported. The Rosetta build is
-the recommended version, as the FEX one is an early state.
+the recommended version, as the FEX one is in an early state.
 
 The macOS app itself is located in the ```app``` folder. The core logic is in ```dylib```.
 ```lsteamclient``` is a macOS port of Valve's lsteamclient. ```steam-shim```is a port of Valve's
