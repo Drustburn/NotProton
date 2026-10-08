@@ -24,6 +24,25 @@ while [ "$argi" -lt "$argc" ]; do
   argi=$((argi+1))
 done
 
+# Global defaults for every game: KEY=VALUE lines in global.env, same name rules as the
+# launch options; a game's own launch options win.
+global_env="$HOME/Library/Application Support/notproton/global.env"
+if [ -r "$global_env" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      CX_GRAPHICS*=*|D3DM_*=*|DXMT_*=*|DXVK_*=*|MTL_*=*|NOTPROTON_*=*|ROSETTA_*=*|WINE*=*)
+        name=${line%%=*}
+        eval "isset=\${$name+x}"
+        # shellcheck disable=SC2154 # eval assigns isset on the line above
+        [ -n "$isset" ] && continue
+        # shellcheck disable=SC2163 # line is a NAME=VALUE pair
+        export "$line"
+        launch_env="$launch_env $line"
+        ;;
+    esac
+  done < "$global_env"
+fi
+
 case "$verb" in
   getcompatpath)
     printf '%s\n' "$STEAM_COMPAT_DATA_PATH"
@@ -518,6 +537,16 @@ if [ "$runner_kind" = selfbuilt ]; then
   esac
   export CX_ACTIVE_GRAPHICS_BACKEND="$backend"
   echo "graphics: $backend from $backend_from" >> "$log" 2>&1 || true
+fi
+
+# Apple's Metal Performance HUD: when it is on and nothing else is configured, keep it small
+# in the top-right corner with just the frame rate and frame time.
+if [ "${MTL_HUD_ENABLED:-0}" = 1 ]; then
+  export MTL_HUD_ALIGNMENT="${MTL_HUD_ALIGNMENT:-topright}"
+  export MTL_HUD_SCALE="${MTL_HUD_SCALE:-0.1}"
+  export MTL_HUD_OPACITY="${MTL_HUD_OPACITY:-0.85}"
+  export MTL_HUD_ELEMENTS="${MTL_HUD_ELEMENTS:-fps,frameinterval}"
+  echo "hud: $MTL_HUD_ALIGNMENT scale=$MTL_HUD_SCALE elements=$MTL_HUD_ELEMENTS" >> "$log" 2>&1 || true
 fi
 
 export WINEDEBUG="${WINEDEBUG:-err+all,fixme-all}"
