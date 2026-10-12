@@ -33,7 +33,7 @@ for (const form of Object.keys(FORMS)) {
        'd3dmetal keeps one DLSS and hides MetalFX');
   // Both flags are labeled DLSS, so a backend showing its own and its neighbor's
   // would put the same word on two rows.
-  for (const b of ['', 'd3dmetal', 'dxmt', 'dxvk', 'wined3d']) {
+  for (const b of ['', 'd3dmetal', 'd3dmetal4', 'dxmt', 'dxvk', 'wined3d']) {
     const ls = toggles(nodes(b ? 'CX_GRAPHICS_BACKEND=' + b : ''));
     t.ok(ls.filter(l => l === 'DLSS').length === (b === 'dxvk' || b === 'wined3d' ? 0 : 1),
          `${b || 'automatic'} shows DLSS at most once (${ls.join(',')})`);
@@ -45,10 +45,24 @@ for (const form of Object.keys(FORMS)) {
     t.ok(last().includes(key + '=1'), `${b} DLSS writes ${key} (${last()})`);
   };
   dlss('d3dmetal', 'D3DM_ENABLE_METALFX');
+  dlss('d3dmetal4', 'D3DM_ENABLE_METALFX');
   dlss('dxmt', 'DXMT_ENABLE_NVEXT');
   t.ok(nodes('CX_GRAPHICS_BACKEND=dxmt DXMT_ENABLE_NVEXT=1')
          .find(x => x.props.label === 'DLSS').props.checked === true,
        'the dxmt DLSS toggle reads as on from its argument');
+
+  // D3DMetal 4's Metal 4 path is its own and stays off unless asked for.
+  const MTL4 = 'Metal 4 renderer (beta)';
+  for (const b of ['', 'd3dmetal', 'dxmt', 'dxvk', 'wined3d']) {
+    t.ok(!toggles(nodes(b ? 'CX_GRAPHICS_BACKEND=' + b : '')).includes(MTL4),
+         `${b || 'automatic'} shows no Metal 4 row`);
+  }
+  r = nodes('CX_GRAPHICS_BACKEND=d3dmetal4');
+  t.ok(toggles(r).includes(MTL4) && r.find(x => x.props.label === MTL4).props.checked === false,
+       'd3dmetal4 shows the Metal 4 row, off by default');
+  written.length = 0;
+  r.find(x => x.props.label === MTL4).props.onChange(true);
+  t.ok(last().includes('D3DM_MTL4=1'), `the Metal 4 row writes D3DM_MTL4 (${last()})`);
 
   t.ok(nodes('CX_GRAPHICS_BACKEND=dxmt').find(x => x.type === 'Dropdown').props.selectedOption === 'dxmt',
        'the backend dropdown reflects the current value');
@@ -71,9 +85,9 @@ for (const form of Object.keys(FORMS)) {
   // The value is the name wine gives the library, which is lower case, and the label is
   // the name in a list of four the reader picks from.
   const backends = nodes('').find(x => x.type === 'Dropdown').props.rgOptions;
-  t.ok(backends.map(o => o.label).join(',') === 'Automatic,D3DMetal,DXMT,DXVK,WineD3D',
+  t.ok(backends.map(o => o.label).join(',') === 'Automatic,D3DMetal,D3DMetal 4 (macOS 27),DXMT,DXVK,WineD3D',
        `the backends name themselves (${backends.map(o => o.label).join(',')})`);
-  t.ok(backends.map(o => o.data).join(',') === ',d3dmetal,dxmt,dxvk,wined3d',
+  t.ok(backends.map(o => o.data).join(',') === ',d3dmetal,d3dmetal4,dxmt,dxvk,wined3d',
        'the backend values stay as the tool reads them');
 
   const root = P({ details: details('') });

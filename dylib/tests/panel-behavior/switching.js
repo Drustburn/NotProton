@@ -10,6 +10,7 @@ if (!emit) { console.error('usage: switching.js <emit>'); process.exit(2); }
 const DXMT = ['DXMT_METALFX_SPATIAL_SWAPCHAIN', 'DXMT_CONFIG'];
 const D3DM = ['D3DM_ENABLE_METALFX'];
 const NVEXT = ['DXMT_ENABLE_NVEXT'];
+const MTL4 = ['D3DM_MTL4'];
 const DLSS_ON = 'CX_GRAPHICS_BACKEND=dxmt DXMT_ENABLE_NVEXT=1';
 const UPSCALED = 'CX_GRAPHICS_BACKEND=dxmt DXMT_METALFX_SPATIAL_SWAPCHAIN=1'
                + ' DXMT_CONFIG=d3d11.metalSpatialUpscaleFactor=2.0';
@@ -22,6 +23,12 @@ const CASES = [
   { to: 'wined3d',  from: UPSCALED, gone: DXMT, kept: [] },
   { to: 'dxmt',     from: 'CX_GRAPHICS_BACKEND=d3dmetal D3DM_ENABLE_METALFX=1', gone: D3DM, kept: [] },
   { to: 'dxvk',     from: 'CX_GRAPHICS_BACKEND=d3dmetal D3DM_ENABLE_METALFX=1', gone: D3DM, kept: [] },
+  // Both D3DMetal versions read the same DLSS flag; only D3DMetal 4 has a Metal 4 row,
+  // and automatic never picks it, so leaving 4 takes the flag along.
+  { to: 'd3dmetal4', from: 'CX_GRAPHICS_BACKEND=d3dmetal D3DM_ENABLE_METALFX=1', gone: [], kept: D3DM },
+  { to: 'd3dmetal',  from: 'CX_GRAPHICS_BACKEND=d3dmetal4 D3DM_ENABLE_METALFX=1 D3DM_MTL4=1', gone: MTL4, kept: D3DM },
+  { to: '',          from: 'CX_GRAPHICS_BACKEND=d3dmetal4 D3DM_MTL4=1', gone: MTL4, kept: [] },
+  { to: 'dxmt',      from: 'CX_GRAPHICS_BACKEND=d3dmetal4 D3DM_ENABLE_METALFX=1 D3DM_MTL4=1', gone: D3DM.concat(MTL4), kept: [] },
   // Automatic resolves to either backend, so neither one's arguments are stale.
   { to: '',         from: UPSCALED, gone: [], kept: DXMT },
   { to: '',         from: 'CX_GRAPHICS_BACKEND=d3dmetal D3DM_ENABLE_METALFX=1', gone: [], kept: D3DM },

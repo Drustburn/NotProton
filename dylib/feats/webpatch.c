@@ -123,7 +123,7 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     "checked:(g(ks[0])||d||\"\")===on," \
     "onChange:v=>s(ks.map(k=>[k,v?on:(off||\"\")]))},ks[0])," \
     "b=g(\"CX_GRAPHICS_BACKEND\")," \
-    "dm=\"\"===b||\"d3dmetal\"===b," \
+    "dm=\"\"===b||\"d3dmetal\"===b||\"d3dmetal4\"===b," \
     "dx=\"\"===b||\"dxmt\"===b," \
     "sw=\"1\"===g(\"DXMT_METALFX_SPATIAL_SWAPCHAIN\")," \
     "F=\"d3d11.metalSpatialUpscaleFactor=\"," \
@@ -135,6 +135,7 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     "{data:\"3.0\",label:\"3x\"}]," \
     "B=[{data:\"\",label:\"Automatic\"}," \
     "{data:\"d3dmetal\",label:\"D3DMetal\"}," \
+    "{data:\"d3dmetal4\",label:\"D3DMetal 4 (macOS 27)\"}," \
     "{data:\"dxmt\",label:\"DXMT\"}," \
     "{data:\"dxvk\",label:\"DXVK\"}," \
     "{data:\"wined3d\",label:\"WineD3D\"}];" \
@@ -145,12 +146,14 @@ static int out_expand(np_out_t *o, const char *replace, const np_cap_t *caps) {
     "(0," RT ".jsxs)(" BARREL ".XY,{label:\"Graphics\",children:[" \
     "(0," RT ".jsx)(" BARREL ".m,{rgOptions:B,selectedOption:b," \
     "onChange:v=>s([[\"CX_GRAPHICS_BACKEND\",v.data]]" \
-    ".concat(\"\"===v.data||\"d3dmetal\"===v.data?[]:[[\"D3DM_ENABLE_METALFX\",\"\"]])" \
+    ".concat(\"\"===v.data||\"d3dmetal\"===v.data||\"d3dmetal4\"===v.data?[]:[[\"D3DM_ENABLE_METALFX\",\"\"]])" \
+    ".concat(\"d3dmetal4\"===v.data?[]:[[\"D3DM_MTL4\",\"\"]])" \
     ".concat(\"\"===v.data||\"dxmt\"===v.data?[]:" \
     "[[\"DXMT_METALFX_SPATIAL_SWAPCHAIN\",\"\"],[\"DXMT_CONFIG\",\"\"]])" \
     ".concat(\"dxmt\"===v.data?[]:[[\"DXMT_ENABLE_NVEXT\",\"\"]]))})," \
     "T([\"MTL_HUD_ENABLED\"],\"Metal HUD\",\"1\")," \
     "dm&&T([\"D3DM_ENABLE_METALFX\"],\"DLSS\",\"1\")," \
+    "\"d3dmetal4\"===b&&T([\"D3DM_MTL4\"],\"Metal 4 renderer (beta)\",\"1\")," \
     "\"dxmt\"===b&&T([\"DXMT_ENABLE_NVEXT\"],\"DLSS\",\"1\")," \
     "T([\"ROSETTA_ADVERTISE_AVX\"],\"Advertise AVX2 to Rosetta\",\"1\",\"0\")," \
     "T([\"WINEMSYNC\"],\"MSync\",\"1\",\"0\",\"1\")," \

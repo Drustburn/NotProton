@@ -517,10 +517,32 @@ if [ "$runner_kind" = selfbuilt ]; then
     esac
     backend_from="auto ($api)"
   fi
+  # D3DMetal 4 (Game Porting Toolkit 4) sits next to D3DMetal 3 and needs macOS 27. Wine
+  # compares CX_ACTIVE_GRAPHICS_BACKEND with "d3dmetal" (hardware scheduling caps for
+  # D3D12), so both versions run under that name and only the directories differ.
+  d3dm=d3dmetal
+  d3dm_lib="$CX_ROOT/lib/external/libd3dshared.dylib"
+  if [ "$backend" = d3dmetal4 ]; then
+    backend=d3dmetal
+    macos=$(sw_vers -productVersion 2>/dev/null || true)
+    macos_major=${macos%%.*}
+    case "$macos_major" in ''|*[!0-9]*) macos_major=0 ;; esac
+    if [ ! -f "$CX_ROOT/lib/external/d3dmetal4/libd3dshared.dylib" ]; then
+      echo "=== no D3DMetal 4 in this runner, using D3DMetal 3 ===" >> "$log" 2>&1 || true
+    elif [ "$macos_major" -lt 27 ]; then
+      echo "=== D3DMetal 4 needs macOS 27 (this is $macos), using D3DMetal 3 ===" >> "$log" 2>&1 || true
+    else
+      d3dm=d3dmetal4
+      d3dm_lib="$CX_ROOT/lib/external/d3dmetal4/libd3dshared.dylib"
+      # The Metal 4 path of the 4.0 beta ends some games within a minute without a word,
+      # so it stays off unless a game asks for it.
+      export D3DM_MTL4="${D3DM_MTL4:-0}"
+    fi
+  fi
   case "$backend" in
     d3dmetal)
-      export WINEDLLPATH_PREPEND="$CX_ROOT/lib/renderers/d3dmetal"
-      export CX_APPLEGPTK_LIBD3DSHARED_PATH="$CX_ROOT/lib/external/libd3dshared.dylib"
+      export WINEDLLPATH_PREPEND="$CX_ROOT/lib/renderers/$d3dm"
+      export CX_APPLEGPTK_LIBD3DSHARED_PATH="$d3dm_lib"
       ;;
     dxmt)
       export WINEDLLPATH_PREPEND="$CX_ROOT/lib/renderers/dxmt"
@@ -536,7 +558,9 @@ if [ "$runner_kind" = selfbuilt ]; then
     *) backend=wined3d ;;
   esac
   export CX_ACTIVE_GRAPHICS_BACKEND="$backend"
-  echo "graphics: $backend from $backend_from" >> "$log" 2>&1 || true
+  backend_label="$backend"
+  [ "$backend" = d3dmetal ] && [ "$d3dm" = d3dmetal4 ] && backend_label="d3dmetal 4 (MTL4=$D3DM_MTL4)"
+  echo "graphics: $backend_label from $backend_from" >> "$log" 2>&1 || true
 fi
 
 # Apple's Metal Performance HUD: when it is on and nothing else is configured, keep it small
@@ -556,7 +580,7 @@ if [ "${MTL_HUD_ENABLED:-0}" = 1 ]; then
     case ",$MTL_HUD_ELEMENTS," in *graph*|*histogram*) rows=$((rows + 3)) ;; esac
     wine_label="$(sed -n 's/.*"wine": "\(.*\)".*/\1/p' "$CX_ROOT/runner.json" 2>/dev/null) ($(readlink "$CX_ROOT" 2>/dev/null || echo runner))"
     "$syshud" --offset "${NOTPROTON_SYSHUD_OFFSET:-$((14 + rows * 14))}" \
-      --label "Wine: $wine_label" --label "Graphics: ${backend:-${CX_ACTIVE_GRAPHICS_BACKEND:-?}} (Rosetta)" \
+      --label "Wine: $wine_label" --label "Graphics: ${backend_label:-${CX_ACTIVE_GRAPHICS_BACKEND:-?}} (Rosetta)" \
       --pid $$ --app "com.notproton.launcher.$app_id" >> "$log" 2>&1 &
     syshud_pid=$!
   fi
