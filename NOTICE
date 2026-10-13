@@ -30,3 +30,4 @@ These third party files carry their original notices from the project authors:
   steam-shim/json/json-forwards.h    JsonCpp, public domain / MIT (header)
   vendor/cJSON.c                     cJSON, MIT (header)
   vendor/cJSON.h                     cJSON, MIT (header)
+  gamefixes/aion2/                   aion2-wine-compat by Yuki-fox, MIT (gamefixes/aion2/LICENSE)

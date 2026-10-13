@@ -851,6 +851,18 @@ if [ -n "$STEAM_DYLD_INSERT_LIBRARIES" ]; then
 else
   echo "=== client staged no overlay renderer, overlay disabled ===" >> "$log" 2>&1 || true
 fi
+# AION 2: NC Guard's start-up CPUID trampoline switches to 32-bit code, which Rosetta does not
+# run. gamefixes/aion2 (aion2-wine-compat) emulates it from Wine's signal handlers. It rides on
+# the overlay's insert list, ahead of it; NOTPROTON_AION2_COMPAT=0 leaves it out.
+aion2_compat="$HOME/Library/Application Support/notproton/aion2-compat/compat_cpuid.dylib"
+if [ "$app_id" = 3393110 ] && [ "${NOTPROTON_AION2_COMPAT:-1}" != 0 ] && [ -f "$aion2_compat" ]; then
+  case ":$STEAM_DYLD_INSERT_LIBRARIES:" in
+    *":$aion2_compat:"*) ;;
+    *) STEAM_DYLD_INSERT_LIBRARIES="$aion2_compat${STEAM_DYLD_INSERT_LIBRARIES:+:$STEAM_DYLD_INSERT_LIBRARIES}" ;;
+  esac
+  export STEAM_DYLD_INSERT_LIBRARIES
+  echo "=== aion2-wine-compat inserted ===" >> "$log" 2>&1 || true
+fi
 set -- --args "$shim_exe" "$@"
 for name in $(env | sed -nE 's/^(Steam[A-Za-z0-9]*|WINEDLLPATH_PREPEND|(CX_GRAPHICS|CX_ACTIVE_GRAPHICS|CX_APPLEGPTK_|D3DM_|DXMT_|DXVK_|MTL_|ROSETTA_)[A-Z0-9_]*)=.*/\1/p'); do
   eval "value=\$$name"
