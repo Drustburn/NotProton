@@ -327,6 +327,21 @@ if [ -n "$STEAM_COMPAT_DATA_PATH" ]; then
   "$WINELOADER" reg add 'HKLM\Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\AeDebug' /v Auto /t REG_SZ /d 0 /f >> "$log" 2>&1 || true
   "$WINELOADER" reg add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f >> "$log" 2>&1 || true
 
+  # The Witcher 3 5.0 looks up ntdll's wine_get_version and, when it finds it, never starts
+  # NVIDIA Streamline: no DLSS, Reflex or DLSS-G. The runner's HideWineExports (wine-staging)
+  # makes those exports look absent. A prefix belongs to one game, so the prefix-wide value
+  # reaches only it. NOTPROTON_HIDE_WINE=1 or =0 decides for any game.
+  hide_wine="${NOTPROTON_HIDE_WINE:-}"
+  if [ -z "$hide_wine" ]; then
+    case "$app_id" in 292030) hide_wine=1 ;; *) hide_wine=0 ;; esac
+  fi
+  echo "wine exports: hidden=$hide_wine" >> "$log" 2>&1 || true
+  if [ "$hide_wine" = 1 ]; then
+    "$WINELOADER" reg add 'HKCU\Software\Wine' /v HideWineExports /t REG_SZ /d Y /f >> "$log" 2>&1 || true
+  else
+    "$WINELOADER" reg delete 'HKCU\Software\Wine' /v HideWineExports /f >> "$log" 2>&1 || true
+  fi
+
   echo "video: RetinaMode=${NOTPROTON_RETINA:-0}" >> "$log" 2>&1 || true
   if [ "$NOTPROTON_RETINA" = "1" ]; then
     "$WINELOADER" reg add 'HKCU\Software\Wine\Mac Driver' /v RetinaMode /t REG_SZ /d y /f >> "$log" 2>&1 || true
@@ -543,6 +558,18 @@ if [ "$runner_kind" = selfbuilt ]; then
     d3dmetal)
       export WINEDLLPATH_PREPEND="$CX_ROOT/lib/renderers/$d3dm"
       export CX_APPLEGPTK_LIBD3DSHARED_PATH="$d3dm_lib"
+      # Apple's GPTK Read Me: DLSS -> MetalFX also needs D3DMetal's nvngx.dll and nvapi64.dll
+      # in the prefix's system32, which otherwise holds Wine's placeholders. NGX inside the
+      # game loads _nvngx.dll from there first (NGXCore FullPath is C:\windows\system32) and
+      # turns down the placeholder nvngx.dll for lacking NVIDIA's signature, so without them
+      # Streamline unloads DLSS. D3DMetal 3 and 4 differ, so the copies follow the backend.
+      ngx_src="$CX_ROOT/lib/renderers/$d3dm/x86_64-windows"
+      ngx_dst="$WINEPREFIX/drive_c/windows/system32"
+      for ngx_dll in nvngx.dll _nvngx.dll nvapi64.dll; do
+        [ -f "$ngx_src/$ngx_dll" ] || continue
+        cmp -s "$ngx_src/$ngx_dll" "$ngx_dst/$ngx_dll" ||
+          cp -f "$ngx_src/$ngx_dll" "$ngx_dst/$ngx_dll" >> "$log" 2>&1 || true
+      done
       ;;
     dxmt)
       export WINEDLLPATH_PREPEND="$CX_ROOT/lib/renderers/dxmt"
